@@ -15,8 +15,15 @@ exports.getAllDestinations = async (_req, res) => {
 // Get single destination by ID
 exports.getDestinationById = async (req, res) => {
   try {
+    const { id } = req.params;
+
+    // ✅ Check if ID is a valid MongoDB ObjectId
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ message: "Invalid destination ID" });
+    }
+
     const destination = await Destination.findOne({
-      _id: req.params.id,
+      _id: id,
       isActive: true
     });
 
@@ -25,7 +32,8 @@ exports.getDestinationById = async (req, res) => {
     }
 
     res.json(destination);
-  } catch {
+  } catch (err) {
+    console.error(err);
     res.status(500).json({ message: "Server error" });
   }
 };
