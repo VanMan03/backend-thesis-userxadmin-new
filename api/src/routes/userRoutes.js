@@ -5,7 +5,7 @@ const {
   updatePreferences
 } = require("../controllers/userController");
 
-const auth = require("../middleware/authmiddleware");
+const auth = require("../middleware/authMiddleware");
 
 router.get("/profile", auth, getProfile);
 router.put("/preferences", auth, updatePreferences);

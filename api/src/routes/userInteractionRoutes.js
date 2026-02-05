@@ -4,7 +4,7 @@ const {
   logInteraction
 } = require("../controllers/userInteractionController");
 
-const auth = require("../middleware/authmiddleware");
+const auth = require("../middleware/authMiddleware");
 
 router.post("/", auth, logInteraction);
 
