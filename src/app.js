@@ -1,8 +1,11 @@
 const express = require('express');
 const morgan = require('morgan');
 const cors = require('cors');
-require('dotenv').config();
 const { connectDB } = require('./db');
+
+app.get('/', (req, res) => {
+  res.json({ message: 'API is running' });
+});
 
 const authRoutes = require('./routes/authRoutes');
 const userRoutes = require('./routes/userRoutes');
