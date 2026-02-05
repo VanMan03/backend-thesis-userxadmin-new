@@ -1,5 +1,5 @@
-const { connectDB } = require('../src/db');
-const app = require('../src/app');
+const { connectDB } = require('./api/src/db');
+const app = require('./api/src/app');
 
 // Only start server locally, not on Vercel
 if (require.main === module) {
