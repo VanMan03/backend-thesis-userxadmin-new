@@ -1,16 +1,37 @@
 // This controller manages admin operations for destinations
 const Destination = require("../models/Destination");
 
-// CREATE destination
 exports.createDestination = async (req, res) => {
   try {
-    const destination = await Destination.create(req.body);
+    const {
+      name,
+      description,
+      category,
+      estimatedCost,
+      features
+    } = req.body;
+
+    // Validate required fields
+    if (!name || !description || !category || estimatedCost === undefined) {
+      return res.status(400).json({ message: "Missing required fields" });
+    }
+
+    const destination = await Destination.create({
+      name,
+      description,
+      category,
+      estimatedCost,
+      features: features || {},
+      isActive: true // ✅ ensure required field is set
+    });
+
     res.status(201).json(destination);
   } catch (err) {
-    console.error(err);
+    console.error("Create destination error:", err);
     res.status(500).json({ message: "Server error" });
-  } 
+  }
 };
+
 
 // EDIT / UPDATE destination
 exports.updateDestination = async (req, res) => {
