@@ -1,6 +1,5 @@
 //Manages destination data retrieval for users
 const Destination = require("../models/Destination");
-const mongoose = require("mongoose");
 
 //Get all active destinations (for users)
 
