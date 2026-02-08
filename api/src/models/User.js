@@ -1,13 +1,19 @@
 const mongoose = require("mongoose");
 
-const PreferenceSchema = new mongoose.Schema({
-  nature: { type: Boolean, default: false },
-  beach: { type: Boolean, default: false },
-  trekking: { type: Boolean, default: false },
-  swimming: { type: Boolean, default: false },
-  cultural: { type: Boolean, default: false },
-  adventure: { type: Boolean, default: false }
-}, { _id: false });
+const PreferenceSchema = new mongoose.Schema(
+  {
+    natureTourism: { type: Boolean, default: false },
+    culturalTourism: { type: Boolean, default: false },
+    sunAndBeachTourism: { type: Boolean, default: false },
+    cruiseAndNauticalTourism: { type: Boolean, default: false },
+    leisureAndEntertainmentTourism: { type: Boolean, default: false },
+    divingAndMarineSportsTourism: { type: Boolean, default: false },
+    healthWelnessRetirementTourism: { type: Boolean, default: false },
+    MICEAndEventsTourism: { type: Boolean, default: false },
+    educationTourism: { type: Boolean, default: false }
+  },
+  { _id: false }
+);
 
 const UserSchema = new mongoose.Schema(
   {
@@ -33,7 +39,11 @@ const UserSchema = new mongoose.Schema(
       default: "user"
     },
 
-    preferences: PreferenceSchema,
+    preferences: {
+  type: PreferenceSchema,
+  default: () => ({})
+  },
+
 
     activityScore: {
       type: Number,

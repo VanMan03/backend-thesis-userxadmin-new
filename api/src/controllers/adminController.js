@@ -1,5 +1,7 @@
 // This controller manages admin operations for destinations
 const Destination = require("../models/Destination");
+const User = require("../models/User");
+const Itinerary = require("../models/Itinerary");
 const { normalizeFeatures } = require("../utils/mormalizeFeatures");
 
 exports.createDestination = async (req, res) => {
@@ -64,6 +66,30 @@ exports.deleteDestination = async (req, res) => {
     await destination.save();
 
     res.json({ message: "Destination deactivated successfully" });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+exports.getAllUsers = async (req, res) => {
+  try {
+    const users = await User.find().select("-password");
+
+    res.json(users);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+exports.getAllItineraries = async (_req, res) => {
+  try {
+    const itineraries = await Itinerary.find()
+      .populate("user", "name email")
+      .populate("destinations.destination", "name");
+
+    res.json(itineraries);
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Server error" });
