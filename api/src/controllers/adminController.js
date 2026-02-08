@@ -1,18 +1,34 @@
 const Destination = require("../models/Destination");
+const { normalizeFeatures } = require("../utils/mormalizeFeatures");
 
-// CREATE (already working)
 exports.createDestination = async (req, res) => {
   try {
+    const {
+      name,
+      description,
+      category,
+      features, // array from frontend
+      estimatedCost
+    } = req.body;
+
+    const normalizedFeatures = normalizeFeatures(category, features);
+
     const destination = await Destination.create({
-      ...req.body,
+      name,
+      description,
+      category,
+      features: normalizedFeatures,
+      estimatedCost,
       isActive: true
     });
+
     res.status(201).json(destination);
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Server error" });
   }
 };
+
 
 // EDIT
 exports.updateDestination = async (req, res) => {

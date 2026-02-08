@@ -1,17 +1,21 @@
-const mongoose = require("mongoose");
-
 const DestinationSchema = new mongoose.Schema(
   {
-    name: { type: String, required: true },
-    description: { type: String, required: true },
-    category: { type: String, required: true },
-    estimatedCost: { type: Number, required: true },
-    features: {
-      type: Object,
-      default: {}
+    name: String,
+    description: String,
+
+    category: {
+      type: String,
+      required: true // e.g. "Nature Tourism"
     },
 
-    // 🔑 soft delete flag
+    features: {
+      type: Object,
+      required: true
+      // e.g. { wildernessTrekking: 1, ecoTours: 1 }
+    },
+
+    estimatedCost: Number,
+
     isActive: {
       type: Boolean,
       default: true
