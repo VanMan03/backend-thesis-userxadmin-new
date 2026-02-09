@@ -28,13 +28,17 @@ images: {
       url: String,
       publicId: String
     }
-  ],
-  validate: [arrayLimit, 4]
+  ]
+
 }
 
 
   },
   { timestamps: true }
 );
+
+DestinationSchema.path("images").validate(function (val) {
+  return val.length <= 4;
+}, "Maximum of 4 images allowed");
 
 module.exports = mongoose.model("Destination", DestinationSchema);
