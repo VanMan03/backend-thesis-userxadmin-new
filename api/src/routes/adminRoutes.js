@@ -3,8 +3,12 @@ const router = express.Router();
 const upload = require("../middleware/uploadMiddleware");
 
 
+
+
+
 const {
   createDestination,
+  getAllDestinationsAdmin,
   updateDestination,
   deleteDestination,
   uploadDestinationImage,
@@ -20,6 +24,7 @@ router.post("/destinations", auth, role("admin"), createDestination);
 
 router.put("/destinations/:id", auth, role("admin"), updateDestination);
 router.delete("/destinations/:id", auth, role("admin"), deleteDestination);
+router.get("/destinations", auth, role("admin"), getAllDestinationsAdmin);
 
 router.get("/users", auth, role("admin"), getAllUsers);
 router.get("/itineraries", auth, role("admin"), getAllItineraries);

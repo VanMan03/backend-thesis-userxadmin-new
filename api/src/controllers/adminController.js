@@ -73,6 +73,16 @@ exports.deleteDestination = async (req, res) => {
   }
 };
 
+exports.getAllDestinationsAdmin = async (req, res) => {
+  try {
+    const destinations = await Destination.find(); // includes inactive
+    res.json(destinations);
+  } catch (err) {
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+
 exports.getAllUsers = async (req, res) => {
   try {
     const users = await User.find().select("-password");
