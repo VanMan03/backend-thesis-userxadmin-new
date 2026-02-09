@@ -19,7 +19,19 @@ const DestinationSchema = new mongoose.Schema(
     isActive: {
       type: Boolean,
       default: true
+    },
+
+images: {
+  type: [
+    {
+      url: String,
+      publicId: String
     }
+  ],
+  validate: [arrayLimit, "Maximum 4 images allowed"]
+}
+
+
   },
   { timestamps: true }
 );

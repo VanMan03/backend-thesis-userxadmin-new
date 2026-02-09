@@ -1,5 +1,7 @@
 const express = require("express");
 const router = express.Router();
+const upload = require("../middleware/uploadMiddleware");
+const { uploadDestinationImage } = require("../controllers/adminController");
 
 const {
   createDestination,
@@ -19,6 +21,23 @@ router.delete("/destinations/:id", auth, role("admin"), deleteDestination);
 
 router.get("/users", auth, role("admin"), getAllUsers);
 router.get("/itineraries", auth, role("admin"), getAllItineraries);
+
+router.post(
+  "/destinations/:id/images",
+  auth,
+  role("admin"),
+  upload.array("images", 4),
+  uploadDestinationImages
+);
+
+
+router.delete(
+  "/destinations/:id/images/:imageIndex",
+  auth,
+  role("admin"),
+  deleteDestinationImage
+);
+
 
 
 module.exports = router;

@@ -3,6 +3,7 @@ const Destination = require("../models/Destination");
 const User = require("../models/User");
 const Itinerary = require("../models/Itinerary");
 const { normalizeFeatures } = require("../utils/mormalizeFeatures");
+const cloudinary = require("../config/cloudinary");
 
 exports.createDestination = async (req, res) => {
   try {
@@ -95,3 +96,43 @@ exports.getAllItineraries = async (_req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 };
+
+exports.uploadDestinationImage = async (req, res) => {
+  try {
+    const destination = await Destination.findById(req.params.id);
+
+    if (destination.images.length >= 4) {
+      return res.status(400).json({ message: "Maximum 4 images only" });
+    }
+
+    destination.images.push({
+      url: req.file.path,
+      publicId: req.file.filename
+    });
+
+    await destination.save();
+
+    res.json(destination);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Upload failed" });
+  }
+};
+
+
+exports.deleteDestinationImage = async (req, res) => {
+  const { id, imageIndex } = req.params;
+
+  const destination = await Destination.findById(id);
+
+  const image = destination.images[imageIndex];
+
+  await cloudinary.uploader.destroy(image.publicId);
+
+  destination.images.splice(imageIndex, 1);
+
+  await destination.save();
+
+  res.json(destination);
+};
+
