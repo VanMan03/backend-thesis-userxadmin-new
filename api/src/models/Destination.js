@@ -29,7 +29,7 @@ images: {
       publicId: String
     }
   ],
-  validate: [arrayLimit, "Maximum 4 images allowed"]
+  validate: [arrayLimit, 4]
 }
 
 
