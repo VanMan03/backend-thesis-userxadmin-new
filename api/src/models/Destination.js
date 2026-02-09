@@ -1,3 +1,4 @@
+const mongoose = require("mongoose");
 const DestinationSchema = new mongoose.Schema(
   {
     name: String,
