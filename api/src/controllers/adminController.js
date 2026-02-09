@@ -115,7 +115,7 @@ exports.uploadDestinationImage = async (req, res) => {
       return res.status(400).json({ message: "No images uploaded" });
     }
 
-    const imageUrls = req.files.map(file => file.path);
+    const imageUrls = req.files.map(file => file.path || file.secure_url);
 
     const destination = await Destination.findByIdAndUpdate(
       id,
@@ -125,7 +125,7 @@ exports.uploadDestinationImage = async (req, res) => {
 
     res.json(destination);
   } catch (err) {
-    console.error(err);
+    console.error("UPLOAD ERROR:", err);
     res.status(500).json({ message: "Image upload failed" });
   }
 };
