@@ -99,25 +99,27 @@ exports.getAllItineraries = async (_req, res) => {
 
 exports.uploadDestinationImage = async (req, res) => {
   try {
-    const destination = await Destination.findById(req.params.id);
+    const { id } = req.params;
 
-    if (destination.images.length >= 4) {
-      return res.status(400).json({ message: "Maximum 4 images only" });
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ message: "No images uploaded" });
     }
 
-    destination.images.push({
-      url: req.file.path,
-      publicId: req.file.filename
-    });
+    const imageUrls = req.files.map(file => file.path);
 
-    await destination.save();
+    const destination = await Destination.findByIdAndUpdate(
+      id,
+      { $push: { images: { $each: imageUrls } } },
+      { new: true }
+    );
 
     res.json(destination);
   } catch (err) {
     console.error(err);
-    res.status(500).json({ message: "Upload failed" });
+    res.status(500).json({ message: "Image upload failed" });
   }
 };
+
 
 
 exports.deleteDestinationImage = async (req, res) => {
