@@ -11,7 +11,6 @@ if (require.main === module) {
     process.exit(1);
   });
 } else {
-  // For Vercel serverless functions, export the app directly
-  connectDB().catch(err => console.error('DB connection error:', err));
+  // For serverless runtimes, db connection is awaited per request in app.js
   module.exports = app;
 }
