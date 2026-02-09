@@ -2,7 +2,7 @@
 const Destination = require("../models/Destination");
 const User = require("../models/User");
 const Itinerary = require("../models/Itinerary");
-const { normalizeFeatures } = require("../utils/mormalizeFeatures");
+const { normalizeFeatures } = require("../utils/normalizeFeatures");
 const cloudinary = require("../config/cloudinary");
 
 exports.createDestination = async (req, res) => {
