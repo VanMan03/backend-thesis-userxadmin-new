@@ -27,7 +27,7 @@ router.post(
   auth,
   role("admin"),
   upload.array("images", 4),
-  uploadDestinationImages
+  uploadDestinationImage
 );
 
 
