@@ -1,12 +1,13 @@
 const express = require("express");
 const router = express.Router();
 const upload = require("../middleware/uploadMiddleware");
-const { uploadDestinationImage } = require("../controllers/adminController");
 
 const {
   createDestination,
   updateDestination,
   deleteDestination,
+  uploadDestinationImage,
+  deleteDestinationImage,
   getAllUsers,
   getAllItineraries
 } = require("../controllers/adminController");
