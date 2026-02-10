@@ -11,6 +11,13 @@ const interactionRoutes = require('./routes/userInteractionRoutes');
 const destinationRoutes = require("./routes/destinationRoutes");
 const recommendationRoutes = require("./routes/recommendationRoutes");
 
+const corsOptions = {
+  origin: (origin, cb) => cb(null, !origin || allowed.includes(origin)),
+  credentials: true,
+  allowedHeaders: ["Content-Type", "Authorization"],
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+};
+
 const app = express();
 const allowed = [
   "http://localhost:5173",
