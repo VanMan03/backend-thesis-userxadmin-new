@@ -204,11 +204,14 @@ exports.uploadDestinationImage = async (req, res) => {
       return res.status(400).json({ message: "No images uploaded" });
     }
 
-    const imageUrls = req.files.map(file => file.path || file.secure_url);
+    const uploadedImages = req.files.map((file) => ({
+      url: file.path || file.secure_url,
+      publicId: file.filename || file.public_id
+    }));
 
     const destination = await Destination.findByIdAndUpdate(
       id,
-      { $push: { images: { $each: imageUrls } } },
+      { $push: { images: { $each: uploadedImages } } },
       { new: true }
     );
 
