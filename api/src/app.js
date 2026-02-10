@@ -37,6 +37,13 @@ app.use('/api/interactions', interactionRoutes);
 app.use("/api/destinations", destinationRoutes);
 app.use("/api/recommendations", recommendationRoutes);
 
+const allowed = ["http://localhost:5173"];
+app.use(cors({
+  origin: (origin, cb) => cb(null, !origin || allowed.includes(origin)),
+  credentials: true,
+}));
+app.options("*", cors());
+
 //route for testing
 app.get('/health', (_req, res) => res.json({ ok: true }));
 

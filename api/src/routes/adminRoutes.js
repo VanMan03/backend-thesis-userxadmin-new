@@ -14,7 +14,8 @@ const {
   uploadDestinationImage,
   deleteDestinationImage,
   getAllUsers,
-  getAllItineraries
+  getAllItineraries,
+  getRoutePreview
 } = require("../controllers/adminController");
 
 const auth = require("../middleware/authMiddleware");
@@ -28,6 +29,7 @@ router.get("/destinations", auth, role("admin"), getAllDestinationsAdmin);
 
 router.get("/users", auth, role("admin"), getAllUsers);
 router.get("/itineraries", auth, role("admin"), getAllItineraries);
+router.post("/routes/preview", auth, role("admin"), getRoutePreview);
 
 router.post(
   "/destinations/:id/images",

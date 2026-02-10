@@ -4,6 +4,15 @@ const User = require("../models/User");
 const Itinerary = require("../models/Itinerary");
 const { normalizeFeatures } = require("../utils/normalizeFeatures");
 const cloudinary = require("../config/cloudinary");
+const {
+  getRouteSummary,
+  reverseGeocode
+} = require("../services/openRouteService");
+
+function parseCoordinate(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
 
 exports.createDestination = async (req, res) => {
   try {
@@ -12,10 +21,41 @@ exports.createDestination = async (req, res) => {
       description,
       category,
       features, // array from frontend
-      estimatedCost
+      estimatedCost,
+      latitude,
+      longitude
     } = req.body;
 
+    const parsedLatitude = parseCoordinate(latitude);
+    const parsedLongitude = parseCoordinate(longitude);
+
+    if (parsedLatitude === null || parsedLongitude === null) {
+      return res.status(400).json({
+        message: "latitude and longitude are required numbers"
+      });
+    }
+
+    if (parsedLatitude < -90 || parsedLatitude > 90) {
+      return res.status(400).json({ message: "latitude must be between -90 and 90" });
+    }
+
+    if (parsedLongitude < -180 || parsedLongitude > 180) {
+      return res.status(400).json({ message: "longitude must be between -180 and 180" });
+    }
+
     const normalizedFeatures = normalizeFeatures(category, features);
+    let resolvedAddress = null;
+
+    if (process.env.OPENROUTESERVICE_API_KEY) {
+      try {
+        resolvedAddress = await reverseGeocode(parsedLongitude, parsedLatitude);
+      } catch (orsErr) {
+        return res.status(502).json({
+          message: "OpenRouteService validation failed",
+          details: orsErr.message
+        });
+      }
+    }
 
     const destination = await Destination.create({
       name,
@@ -23,6 +63,11 @@ exports.createDestination = async (req, res) => {
       category,
       features: normalizedFeatures,
       estimatedCost,
+      location: {
+        latitude: parsedLatitude,
+        longitude: parsedLongitude,
+        resolvedAddress
+      },
       isActive: true
     });
 
@@ -37,9 +82,53 @@ exports.createDestination = async (req, res) => {
 // EDIT
 exports.updateDestination = async (req, res) => {
   try {
+    const updates = { ...req.body };
+
+    const hasLatitude = Object.prototype.hasOwnProperty.call(updates, "latitude");
+    const hasLongitude = Object.prototype.hasOwnProperty.call(updates, "longitude");
+
+    if (hasLatitude || hasLongitude) {
+      const parsedLatitude = parseCoordinate(updates.latitude);
+      const parsedLongitude = parseCoordinate(updates.longitude);
+
+      if (parsedLatitude === null || parsedLongitude === null) {
+        return res.status(400).json({
+          message: "latitude and longitude are required together as numbers"
+        });
+      }
+
+      if (parsedLatitude < -90 || parsedLatitude > 90) {
+        return res.status(400).json({ message: "latitude must be between -90 and 90" });
+      }
+
+      if (parsedLongitude < -180 || parsedLongitude > 180) {
+        return res.status(400).json({ message: "longitude must be between -180 and 180" });
+      }
+
+      let resolvedAddress = null;
+      if (process.env.OPENROUTESERVICE_API_KEY) {
+        try {
+          resolvedAddress = await reverseGeocode(parsedLongitude, parsedLatitude);
+        } catch (orsErr) {
+          return res.status(502).json({
+            message: "OpenRouteService validation failed",
+            details: orsErr.message
+          });
+        }
+      }
+
+      updates.location = {
+        latitude: parsedLatitude,
+        longitude: parsedLongitude,
+        resolvedAddress
+      };
+      delete updates.latitude;
+      delete updates.longitude;
+    }
+
     const destination = await Destination.findByIdAndUpdate(
       req.params.id,
-      req.body,
+      updates,
       { new: true, runValidators: true }
     );
 
@@ -146,5 +235,49 @@ exports.deleteDestinationImage = async (req, res) => {
   await destination.save();
 
   res.json(destination);
+};
+
+exports.getRoutePreview = async (req, res) => {
+  try {
+    const {
+      startLatitude,
+      startLongitude,
+      endLatitude,
+      endLongitude,
+      profile
+    } = req.body;
+
+    const parsedStartLatitude = parseCoordinate(startLatitude);
+    const parsedStartLongitude = parseCoordinate(startLongitude);
+    const parsedEndLatitude = parseCoordinate(endLatitude);
+    const parsedEndLongitude = parseCoordinate(endLongitude);
+
+    if (
+      parsedStartLatitude === null ||
+      parsedStartLongitude === null ||
+      parsedEndLatitude === null ||
+      parsedEndLongitude === null
+    ) {
+      return res.status(400).json({
+        message: "start/end latitude and longitude are required numbers"
+      });
+    }
+
+    const route = await getRouteSummary({
+      startLatitude: parsedStartLatitude,
+      startLongitude: parsedStartLongitude,
+      endLatitude: parsedEndLatitude,
+      endLongitude: parsedEndLongitude,
+      profile
+    });
+
+    res.json(route);
+  } catch (err) {
+    console.error("Route preview error:", err);
+    res.status(502).json({
+      message: "OpenRouteService route fetch failed",
+      details: err.message
+    });
+  }
 };
 

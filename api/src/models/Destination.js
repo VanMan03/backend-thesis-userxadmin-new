@@ -17,6 +17,22 @@ const DestinationSchema = new mongoose.Schema(
 
     estimatedCost: Number,
 
+    location: {
+      latitude: {
+        type: Number,
+        required: true,
+        min: -90,
+        max: 90
+      },
+      longitude: {
+        type: Number,
+        required: true,
+        min: -180,
+        max: 180
+      },
+      resolvedAddress: String
+    },
+
     isActive: {
       type: Boolean,
       default: true
