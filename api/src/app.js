@@ -14,7 +14,6 @@ const recommendationRoutes = require("./routes/recommendationRoutes");
 const app = express();
 app.use(express.json());
 app.use(morgan('dev'));
-app.use(cors());
 app.use(async (_req, res, next) => {
   try {
     await connectDB();
@@ -46,7 +45,7 @@ app.use(cors({
   origin: (origin, cb) => cb(null, !origin || allowed.includes(origin)),
   credentials: true,
 }));
-app.options("*", cors());
+app.options(/.*/, cors());
 //route for testing
 app.get('/health', (_req, res) => res.json({ ok: true }));
 
