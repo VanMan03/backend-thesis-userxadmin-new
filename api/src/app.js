@@ -12,8 +12,19 @@ const destinationRoutes = require("./routes/destinationRoutes");
 const recommendationRoutes = require("./routes/recommendationRoutes");
 
 const app = express();
+const allowed = [
+  "http://localhost:5173",
+  "https://bulusan-wanderer.vercel.app"
+];
+const corsOptions = {
+  origin: (origin, cb) => cb(null, !origin || allowed.includes(origin)),
+  credentials: true,
+};
+
 app.use(express.json());
 app.use(morgan('dev'));
+app.use(cors(corsOptions));
+app.options(/.*/, cors(corsOptions));
 app.use(async (_req, res, next) => {
   try {
     await connectDB();
@@ -35,17 +46,6 @@ app.use('/api/itineraries', itineraryRoutes);
 app.use('/api/interactions', interactionRoutes);
 app.use("/api/destinations", destinationRoutes);
 app.use("/api/recommendations", recommendationRoutes);
-
-
-const allowed = [
-  "http://localhost:5173",
-  "https://bulusan-wanderer.vercel.app"
-];
-app.use(cors({
-  origin: (origin, cb) => cb(null, !origin || allowed.includes(origin)),
-  credentials: true,
-}));
-app.options(/.*/, cors());
 //route for testing
 app.get('/health', (_req, res) => res.json({ ok: true }));
 
