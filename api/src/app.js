@@ -16,8 +16,24 @@ const allowed = [
   "http://localhost:5173",
   "https://bulusan-wanderer.vercel.app"
 ];
+const envAllowed = (process.env.CORS_ORIGINS || "")
+  .split(",")
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+const allowedOrigins = new Set([...allowed, ...envAllowed]);
+const localhostPattern = /^http:\/\/localhost:\d+$/;
+
 const corsOptions = {
-  origin: (origin, cb) => cb(null, !origin || allowed.includes(origin)),
+  origin: (origin, cb) => {
+    if (
+      !origin ||
+      allowedOrigins.has(origin) ||
+      localhostPattern.test(origin)
+    ) {
+      return cb(null, true);
+    }
+    return cb(null, false);
+  },
   credentials: true,
   allowedHeaders: ["Content-Type", "Authorization"],
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
