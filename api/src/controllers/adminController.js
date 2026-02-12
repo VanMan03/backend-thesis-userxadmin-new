@@ -46,7 +46,7 @@ exports.createDestination = async (req, res) => {
     const normalizedFeatures = normalizeFeatures(category, features);
     let resolvedAddress = null;
 
-    if (process.env.OPENROUTESERVICE_API_KEY) {
+    if (process.env.OPENROUTES_API_KEY || process.env.OPENROUTESERVICE_API_KEY) {
       try {
         resolvedAddress = await reverseGeocode(parsedLongitude, parsedLatitude);
       } catch (orsErr) {
@@ -112,7 +112,7 @@ exports.updateDestination = async (req, res) => {
       }
 
       let resolvedAddress = null;
-      if (process.env.OPENROUTESERVICE_API_KEY) {
+      if (process.env.OPENROUTES_API_KEY || process.env.OPENROUTESERVICE_API_KEY) {
         try {
           resolvedAddress = await reverseGeocode(parsedLongitude, parsedLatitude);
         } catch (orsErr) {

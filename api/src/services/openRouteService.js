@@ -1,9 +1,9 @@
 const OPENROUTE_BASE_URL = "https://api.openrouteservice.org";
 
 function getApiKey() {
-  const apiKey = process.env.OPENROUTES_API_KEY;
+  const apiKey = process.env.OPENROUTES_API_KEY || process.env.OPENROUTESERVICE_API_KEY;
   if (!apiKey) {
-    throw new Error("OPENROUTES_API_KEY is missing");
+    throw new Error("OPENROUTES_API_KEY (or OPENROUTESERVICE_API_KEY) is missing");
   }
   return apiKey;
 }

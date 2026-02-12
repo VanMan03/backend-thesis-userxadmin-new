@@ -2,16 +2,14 @@ const express = require("express");
 const router = express.Router();
 const {
   createItinerary,
-  getUserItineraries
+  getUserItineraries,
+  generateItinerary
 } = require("../controllers/itineraryController");
 
 const auth = require("../middleware/authMiddleware");
 
 router.post("/", auth, createItinerary);
 router.get("/", auth, getUserItineraries);
+router.post("/generate", auth, generateItinerary);
 
 module.exports = router;
-
-const { generateItinerary } = require("../controllers/itineraryController");
-
-router.post("/generate", auth, generateItinerary);
