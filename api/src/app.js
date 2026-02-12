@@ -14,6 +14,7 @@ const recommendationRoutes = require("./routes/recommendationRoutes");
 const app = express();
 const allowed = [
   "http://localhost:5173",
+  "http://localhost:5174",
   "https://bulusan-wanderer.vercel.app"
 ];
 const envAllowed = (process.env.CORS_ORIGINS || "")
