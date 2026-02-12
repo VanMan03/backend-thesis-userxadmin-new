@@ -12,24 +12,22 @@ const destinationRoutes = require("./routes/destinationRoutes");
 const recommendationRoutes = require("./routes/recommendationRoutes");
 
 const app = express();
-const allowed = [
-  "http://localhost:5173",
-  "http://localhost:5174",
-  "https://bulusan-wanderer.vercel.app"
-];
-const envAllowed = (process.env.CORS_ORIGINS || "")
+const isProd = process.env.NODE_ENV === "production";
+const defaultAllowedOrigins = ["https://bulusan-wanderer.vercel.app"];
+const envAllowedOrigins = (process.env.CORS_ORIGINS || "")
   .split(",")
   .map((origin) => origin.trim())
   .filter(Boolean);
-const allowedOrigins = new Set([...allowed, ...envAllowed]);
+const allowedOrigins = new Set([...defaultAllowedOrigins, ...envAllowedOrigins]);
 const localhostPattern = /^http:\/\/localhost:\d+$/;
 
 const corsOptions = {
   origin: (origin, cb) => {
+    const isLocalhost = !!origin && localhostPattern.test(origin);
     if (
       !origin ||
       allowedOrigins.has(origin) ||
-      localhostPattern.test(origin)
+      (!isProd && isLocalhost)
     ) {
       return cb(null, true);
     }
