@@ -21,7 +21,13 @@ const {
 const auth = require("../middleware/authMiddleware");
 const role = require("../middleware/roleMiddleware");
 
-router.post("/destinations", auth, role("admin"), createDestination);
+router.post(
+  "/destinations",
+  auth,
+  role("admin"),
+  upload.array("images", 4),
+  createDestination
+);
 
 router.put("/destinations/:id", auth, role("admin"), updateDestination);
 router.delete("/destinations/:id", auth, role("admin"), deleteDestination);

@@ -57,6 +57,11 @@ exports.createDestination = async (req, res) => {
       }
     }
 
+    const uploadedImages = (req.files || []).map((file) => ({
+      url: file.path || file.secure_url,
+      publicId: file.filename || file.public_id
+    }));
+
     const destination = await Destination.create({
       name,
       description,
@@ -68,6 +73,7 @@ exports.createDestination = async (req, res) => {
         longitude: parsedLongitude,
         resolvedAddress
       },
+      images: uploadedImages,
       isActive: true
     });
 
