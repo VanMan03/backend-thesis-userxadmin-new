@@ -1,5 +1,6 @@
 //Handles itinerary creation and retrieval for users
 const Itinerary = require("../models/Itinerary");
+const mongoose = require("mongoose");
 
 exports.createItinerary = async (req, res) => {
   try {
@@ -24,6 +25,29 @@ exports.getUserItineraries = async (req, res) => {
       .populate("destinations.destination");
 
     res.json(itineraries);
+  } catch {
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+exports.deleteUserItinerary = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({ message: "Invalid itinerary ID" });
+    }
+
+    const deletedItinerary = await Itinerary.findOneAndDelete({
+      _id: id,
+      user: req.user.id
+    });
+
+    if (!deletedItinerary) {
+      return res.status(404).json({ message: "Itinerary not found" });
+    }
+
+    res.json({ message: "Itinerary deleted successfully" });
   } catch {
     res.status(500).json({ message: "Server error" });
   }
