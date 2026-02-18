@@ -10,7 +10,6 @@ const {
   knapsackOptimize
 } = require("../services/recommendation/knapsack");
 
-const Itinerary = require("../models/Itinerary");
 const RecommendationFeedback = require("../models/RecommendationFeedback");
 const Destination = require("../models/Destination");
 
@@ -131,7 +130,7 @@ exports.generateItinerary = async (req, res) => {
       0
     );
 
-    const itinerary = await Itinerary.create({
+    const itinerary = {
       user: userId,
       destinations: finalResults.map((item) => ({
         destination: item.destination._id,
@@ -140,8 +139,9 @@ exports.generateItinerary = async (req, res) => {
       })),
       totalCost,
       maxBudget: budgetMode === "constrained" ? parsedBudget : null,
-      budgetMode
-    });
+      budgetMode,
+      isSaved: false
+    };
 
     res.json({
       mode: budgetMode,
