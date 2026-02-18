@@ -12,6 +12,7 @@ const {
 
 const Itinerary = require("../models/Itinerary");
 const RecommendationFeedback = require("../models/RecommendationFeedback");
+const Destination = require("../models/Destination");
 
 const FEEDBACK_EVENT_TYPES = new Set([
   "recommendation_requested",
@@ -89,8 +90,31 @@ exports.generateItinerary = async (req, res) => {
     }
 
     const hybridResults = await getHybridRecommendations(userId);
+    let candidateResults = hybridResults;
 
-    let finalResults = hybridResults;
+    // Fallback for new users/no interaction history.
+    if (!candidateResults.length) {
+      const fallbackDestinations = await Destination.find({ isActive: true })
+        .sort({ createdAt: -1 })
+        .limit(50);
+
+      candidateResults = fallbackDestinations.map((destination) => ({
+        destination,
+        score: 0
+      }));
+    }
+
+    if (!candidateResults.length) {
+      return res.status(200).json({
+        mode: budgetMode,
+        totalCost: 0,
+        recommendations: [],
+        itinerary: null,
+        message: "No active destinations available"
+      });
+    }
+
+    let finalResults = candidateResults;
 
     if (budgetMode === "constrained") {
       if (!Number.isFinite(parsedBudget)) {
@@ -99,7 +123,7 @@ exports.generateItinerary = async (req, res) => {
         });
       }
 
-      finalResults = knapsackOptimize(hybridResults, parsedBudget);
+      finalResults = knapsackOptimize(candidateResults, parsedBudget);
     }
 
     const totalCost = finalResults.reduce(
@@ -122,6 +146,10 @@ exports.generateItinerary = async (req, res) => {
     res.json({
       mode: budgetMode,
       totalCost,
+      recommendations: finalResults.map((item) => ({
+        destination: item.destination,
+        score: item.score
+      })),
       itinerary
     });
   } catch (err) {
