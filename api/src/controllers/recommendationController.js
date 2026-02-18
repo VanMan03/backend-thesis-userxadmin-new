@@ -11,6 +11,46 @@ const {
 } = require("../services/recommendation/knapsack");
 
 const Itinerary = require("../models/Itinerary");
+const RecommendationFeedback = require("../models/RecommendationFeedback");
+
+const FEEDBACK_EVENT_TYPES = new Set([
+  "recommendation_requested",
+  "recommendation_impression",
+  "destination_added",
+  "destination_removed",
+  "itinerary_saved",
+  "saved_itinerary_viewed",
+  "saved_itinerary_updated",
+  "saved_itinerary_deleted"
+]);
+
+function normalizeFeedbackEvent(event, fallbackUserId = null) {
+  if (!event || typeof event !== "object") return null;
+
+  if (!FEEDBACK_EVENT_TYPES.has(event.eventType)) {
+    return null;
+  }
+
+  const timestamp = event.timestamp ? new Date(event.timestamp) : new Date();
+  if (Number.isNaN(timestamp.getTime())) {
+    return null;
+  }
+
+  if (!event.sessionId || typeof event.sessionId !== "string") {
+    return null;
+  }
+
+  return {
+    eventType: event.eventType,
+    timestamp,
+    sessionId: event.sessionId,
+    userId: event.userId || fallbackUserId || null,
+    userEmail: event.userEmail || null,
+    destinationId: event.destinationId || null,
+    itineraryId: event.itineraryId || null,
+    metadata: event.metadata && typeof event.metadata === "object" ? event.metadata : {}
+  };
+}
 
 /**
  * Content-Based Filtering recommendations (baseline)
@@ -34,48 +74,48 @@ exports.getCBFRecommendations = async (req, res) => {
 };
 
 /**
- * Generate itinerary using Hybrid ± Knapsack
+ * Generate itinerary using Hybrid + Knapsack
  */
 exports.generateItinerary = async (req, res) => {
   try {
     const userId = req.user.id;
     const { budgetMode, maxBudget } = req.body;
+    const parsedBudget = Number(maxBudget);
 
-    // 1. Always run hybrid recommendation
+    if (!["constrained", "unconstrained"].includes(budgetMode)) {
+      return res.status(400).json({
+        message: "budgetMode must be constrained or unconstrained"
+      });
+    }
+
     const hybridResults = await getHybridRecommendations(userId);
 
     let finalResults = hybridResults;
 
-    // 2. Conditionally apply knapsack
     if (budgetMode === "constrained") {
-      if (!Number.isFinite(maxBudget)) {
+      if (!Number.isFinite(parsedBudget)) {
         return res.status(400).json({
           message: "Budget is required for constrained mode"
         });
       }
 
-      finalResults = knapsackOptimize(
-        hybridResults,
-        maxBudget
-      );
+      finalResults = knapsackOptimize(hybridResults, parsedBudget);
     }
 
-    // 3. Compute total cost
     const totalCost = finalResults.reduce(
       (sum, item) => sum + (item.destination.estimatedCost || 0),
       0
     );
 
-    // 4. Save itinerary
     const itinerary = await Itinerary.create({
       user: userId,
-      destinations: finalResults.map(item => ({
+      destinations: finalResults.map((item) => ({
         destination: item.destination._id,
         cost: item.destination.estimatedCost || 0,
         hybridScore: item.score
       })),
       totalCost,
-      maxBudget: budgetMode === "constrained" ? maxBudget : null,
+      maxBudget: budgetMode === "constrained" ? parsedBudget : null,
       budgetMode
     });
 
@@ -87,5 +127,58 @@ exports.generateItinerary = async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Server error" });
+  }
+};
+
+/**
+ * Single feedback event ingest
+ * POST /api/recommendations/feedback
+ */
+exports.createFeedbackEvent = async (req, res) => {
+  try {
+    const fallbackUserId = req.user?.id || null;
+    const normalized = normalizeFeedbackEvent(req.body, fallbackUserId);
+
+    if (!normalized) {
+      return res.status(400).json({ message: "Invalid feedback payload" });
+    }
+
+    await RecommendationFeedback.create(normalized);
+    return res.status(201).json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+/**
+ * Batch feedback ingest
+ * POST /api/recommendations/feedback/batch
+ */
+exports.createFeedbackBatch = async (req, res) => {
+  try {
+    const events = Array.isArray(req.body?.events) ? req.body.events : [];
+    if (!events.length) {
+      return res.status(400).json({ message: "events[] is required" });
+    }
+
+    const fallbackUserId = req.user?.id || null;
+    const normalizedEvents = events
+      .map((event) => normalizeFeedbackEvent(event, fallbackUserId))
+      .filter(Boolean);
+
+    if (!normalizedEvents.length) {
+      return res.status(400).json({ message: "No valid events found" });
+    }
+
+    await RecommendationFeedback.insertMany(normalizedEvents, { ordered: false });
+
+    return res.status(201).json({
+      ok: true,
+      accepted: normalizedEvents.length
+    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: "Server error" });
   }
 };
