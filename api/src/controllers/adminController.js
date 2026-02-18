@@ -2,7 +2,7 @@
 const Destination = require("../models/Destination");
 const User = require("../models/User");
 const Itinerary = require("../models/Itinerary");
-const { normalizeFeatures } = require("../utils/normalizeFeatures");
+const { normalizeFeatures, normalizeCategories } = require("../utils/normalizeFeatures");
 const cloudinary = require("../config/cloudinary");
 const {
   getRouteSummary,
@@ -20,6 +20,7 @@ exports.createDestination = async (req, res) => {
       name,
       description,
       category,
+      categories,
       features, // array from frontend
       estimatedCost,
       latitude,
@@ -43,7 +44,20 @@ exports.createDestination = async (req, res) => {
       return res.status(400).json({ message: "longitude must be between -180 and 180" });
     }
 
-    const normalizedFeatures = normalizeFeatures(category, features);
+    const normalizedCategories = normalizeCategories(categories ?? category);
+    if (!normalizedCategories.length) {
+      return res.status(400).json({
+        message: "At least one category is required"
+      });
+    }
+
+    const normalizedFeatures = normalizeFeatures(normalizedCategories, features);
+    if (!Object.keys(normalizedFeatures).length) {
+      return res.status(400).json({
+        message: "At least one valid feature is required"
+      });
+    }
+
     let resolvedAddress = null;
 
     if (process.env.OPENROUTES_API_KEY || process.env.OPENROUTESERVICE_API_KEY) {
@@ -65,7 +79,7 @@ exports.createDestination = async (req, res) => {
     const destination = await Destination.create({
       name,
       description,
-      category,
+      category: normalizedCategories,
       features: normalizedFeatures,
       estimatedCost,
       location: {
@@ -130,6 +144,54 @@ exports.updateDestination = async (req, res) => {
       };
       delete updates.latitude;
       delete updates.longitude;
+    }
+
+    const hasCategoryUpdate =
+      Object.prototype.hasOwnProperty.call(updates, "category") ||
+      Object.prototype.hasOwnProperty.call(updates, "categories");
+    const hasFeaturesUpdate = Object.prototype.hasOwnProperty.call(updates, "features");
+
+    if (hasCategoryUpdate || hasFeaturesUpdate) {
+      const existingDestination = await Destination.findById(req.params.id);
+      if (!existingDestination) {
+        return res.status(404).json({ message: "Destination not found" });
+      }
+
+      const normalizedCategories = hasCategoryUpdate
+        ? normalizeCategories(updates.categories ?? updates.category)
+        : normalizeCategories(existingDestination.category);
+
+      if (!normalizedCategories.length) {
+        return res.status(400).json({
+          message: "At least one category is required"
+        });
+      }
+
+      let normalizedFeatures = existingDestination.features || {};
+      if (hasFeaturesUpdate) {
+        normalizedFeatures = normalizeFeatures(normalizedCategories, updates.features);
+        if (!Object.keys(normalizedFeatures).length) {
+          return res.status(400).json({
+            message: "At least one valid feature is required"
+          });
+        }
+      } else if (normalizedFeatures && typeof normalizedFeatures === "object") {
+        const nestedFeatureMap = Object.values(normalizedFeatures).some((value) =>
+          value && typeof value === "object" && !Array.isArray(value)
+        );
+
+        if (nestedFeatureMap) {
+          normalizedFeatures = Object.fromEntries(
+            Object.entries(normalizedFeatures).filter(([cat]) =>
+              normalizedCategories.includes(cat)
+            )
+          );
+        }
+      }
+
+      updates.category = normalizedCategories;
+      updates.features = normalizedFeatures;
+      delete updates.categories;
     }
 
     const destination = await Destination.findByIdAndUpdate(

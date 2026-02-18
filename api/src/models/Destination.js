@@ -5,14 +5,18 @@ const DestinationSchema = new mongoose.Schema(
     description: String,
 
     category: {
-      type: String,
-      required: true // e.g. "Nature Tourism"
+      type: [String],
+      required: true,
+      validate: {
+        validator: (val) => Array.isArray(val) && val.length > 0
+      }
+      // e.g. ["Nature Tourism", "Cultural Tourism"]
     },
 
     features: {
       type: Object,
       required: true
-      // e.g. { wildernessTrekking: 1, ecoTours: 1 }
+      // e.g. { "Nature Tourism": { ecoTours: 1, wildernessTrekking: 1 } }
     },
 
     estimatedCost: Number,

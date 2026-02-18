@@ -1,6 +1,33 @@
 const Destination = require("../../models/Destination");
 const UserInteraction = require("../../models/UsersInteraction");
 
+function flattenFeatureVector(features) {
+  if (!features || typeof features !== "object") return {};
+
+  const isNested = Object.values(features).some((value) =>
+    value && typeof value === "object" && !Array.isArray(value)
+  );
+
+  if (!isNested) {
+    return Object.fromEntries(
+      Object.entries(features).filter(([, value]) => Number.isFinite(value))
+    );
+  }
+
+  const flattened = {};
+
+  Object.entries(features).forEach(([category, categoryFeatures]) => {
+    if (!categoryFeatures || typeof categoryFeatures !== "object") return;
+
+    Object.entries(categoryFeatures).forEach(([featureKey, value]) => {
+      if (!Number.isFinite(value)) return;
+      flattened[`${category}::${featureKey}`] = value;
+    });
+  });
+
+  return flattened;
+}
+
 /**
  * Compute cosine similarity between two vectors
  */
@@ -34,16 +61,17 @@ async function buildUserPreferenceVector(userId) {
 
   interactions.forEach((interaction) => {
     if (!interaction.destination || !interaction.destination.features) return;
+    const destinationFeatures = flattenFeatureVector(interaction.destination.features);
 
     const weight =
       interaction.action === "view" ? 1 :
       interaction.action === "click" ? 2 :
       interaction.action === "save" ? 3 : 1;
 
-    for (const feature in interaction.destination.features) {
+    for (const feature in destinationFeatures) {
       preferenceVector[feature] =
         (preferenceVector[feature] || 0) +
-        interaction.destination.features[feature] * weight;
+        destinationFeatures[feature] * weight;
     }
   });
 
@@ -58,9 +86,10 @@ async function getContentBasedRecommendations(userId) {
   const userVector = await buildUserPreferenceVector(userId);
 
   const scoredDestinations = destinations.map((destination) => {
+    const destinationFeatures = flattenFeatureVector(destination.features || {});
     const score = cosineSimilarity(
       userVector,
-      destination.features || {}
+      destinationFeatures
     );
 
     return {
