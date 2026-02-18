@@ -19,6 +19,37 @@ const ItinerarySchema = new mongoose.Schema(
       }
     ],
 
+    days: {
+      type: Number,
+      required: false,
+      min: 1,
+      default: null
+    },
+
+    dayPlans: [
+      {
+        dayNumber: {
+          type: Number,
+          required: true,
+          min: 1
+        },
+        destinations: [
+          {
+            destination: {
+              type: mongoose.Schema.Types.ObjectId,
+              ref: "Destination"
+            },
+            cost: Number,
+            hybridScore: Number
+          }
+        ],
+        dayCost: {
+          type: Number,
+          default: 0
+        }
+      }
+    ],
+
     totalCost: {
       type: Number,
       required: true

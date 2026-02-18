@@ -12,6 +12,10 @@ const {
 
 const RecommendationFeedback = require("../models/RecommendationFeedback");
 const Destination = require("../models/Destination");
+const {
+  normalizeDays,
+  splitDestinationsByDays
+} = require("../utils/splitItineraryByDays");
 
 const FEEDBACK_EVENT_TYPES = new Set([
   "recommendation_requested",
@@ -79,13 +83,18 @@ exports.getCBFRecommendations = async (req, res) => {
 exports.generateItinerary = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { budgetMode, maxBudget } = req.body;
+    const { budgetMode, maxBudget, days } = req.body;
     const parsedBudget = Number(maxBudget);
+    const normalizedDays = normalizeDays(days);
 
     if (!["constrained", "unconstrained"].includes(budgetMode)) {
       return res.status(400).json({
         message: "budgetMode must be constrained or unconstrained"
       });
+    }
+
+    if (days !== undefined && normalizedDays === null) {
+      return res.status(400).json({ message: "days must be a positive integer" });
     }
 
     const hybridResults = await getHybridRecommendations(userId);
@@ -142,10 +151,14 @@ exports.generateItinerary = async (req, res) => {
       budgetMode,
       isSaved: false
     };
+    const { dayPlans } = splitDestinationsByDays(itinerary.destinations, normalizedDays);
+    itinerary.days = normalizedDays;
+    itinerary.dayPlans = dayPlans;
 
     res.json({
       mode: budgetMode,
       totalCost,
+      days: normalizedDays,
       recommendations: finalResults.map((item) => ({
         destination: item.destination,
         score: item.score

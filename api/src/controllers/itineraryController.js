@@ -1,20 +1,34 @@
-//Handles itinerary creation and retrieval for users
+// Handles itinerary creation and retrieval for users
 const Itinerary = require("../models/Itinerary");
 const mongoose = require("mongoose");
+const {
+  normalizeDays,
+  splitDestinationsByDays
+} = require("../utils/splitItineraryByDays");
 
 exports.createItinerary = async (req, res) => {
   try {
-    const { destinations, totalCost, maxBudget, budgetMode, isSaved } = req.body;
+    const { destinations, totalCost, maxBudget, budgetMode, isSaved, days } = req.body;
     const parsedBudget = Number(maxBudget);
+    const normalizedDays = normalizeDays(days);
     const normalizedBudgetMode = ["constrained", "unconstrained"].includes(budgetMode)
       ? budgetMode
       : Number.isFinite(parsedBudget)
         ? "constrained"
         : "unconstrained";
 
+    if (days !== undefined && normalizedDays === null) {
+      return res.status(400).json({ message: "days must be a positive integer" });
+    }
+
+    const destinationList = Array.isArray(destinations) ? destinations : [];
+    const { dayPlans } = splitDestinationsByDays(destinationList, normalizedDays);
+
     const itinerary = await Itinerary.create({
       user: req.user.id,
-      destinations,
+      destinations: destinationList,
+      days: normalizedDays,
+      dayPlans,
       totalCost,
       maxBudget: Number.isFinite(parsedBudget) ? parsedBudget : null,
       budgetMode: normalizedBudgetMode,
@@ -31,7 +45,8 @@ exports.createItinerary = async (req, res) => {
 exports.getUserItineraries = async (req, res) => {
   try {
     const itineraries = await Itinerary.find({ user: req.user.id })
-      .populate("destinations.destination");
+      .populate("destinations.destination")
+      .populate("dayPlans.destinations.destination");
 
     res.json(itineraries);
   } catch {
@@ -62,7 +77,6 @@ exports.deleteUserItinerary = async (req, res) => {
   }
 };
 
-
 const {
   getHybridRecommendations
 } = require("../services/recommendation/hybrid");
@@ -76,13 +90,18 @@ const {
 exports.generateItinerary = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { maxBudget } = req.body;
+    const { maxBudget, days } = req.body;
+    const normalizedDays = normalizeDays(days);
 
     if (!maxBudget) {
       return res.status(400).json({ message: "maxBudget is required" });
     }
 
-    // 1️⃣ Get hybrid recommendations
+    if (days !== undefined && normalizedDays === null) {
+      return res.status(400).json({ message: "days must be a positive integer" });
+    }
+
+    // 1) Get hybrid recommendations
     const hybridResults = await getHybridRecommendations(userId);
 
     if (!hybridResults.length) {
@@ -92,29 +111,33 @@ exports.generateItinerary = async (req, res) => {
       });
     }
 
-    // 2️⃣ Apply knapsack optimization
+    // 2) Apply knapsack optimization
     const optimized = knapsackOptimize(hybridResults, maxBudget);
 
-    // 3️⃣ Compute total cost
+    // 3) Compute total cost
     const totalCost = optimized.reduce(
       (sum, item) => sum + item.destination.estimatedCost,
       0
     );
 
-    // 4️⃣ Prepare itinerary destinations
+    // 4) Prepare itinerary destinations
     const destinations = optimized.map((item) => ({
       destination: item.destination._id,
       cost: item.destination.estimatedCost,
       hybridScore: item.score
     }));
+    const { dayPlans } = splitDestinationsByDays(destinations, normalizedDays);
 
-    // 5️⃣ Save itinerary
+    // 5) Save itinerary
     const itinerary = await Itinerary.create({
       user: userId,
       destinations,
+      days: normalizedDays,
+      dayPlans,
       totalCost,
       maxBudget,
-      isSaved: true
+      isSaved: true,
+      budgetMode: "constrained"
     });
 
     res.status(201).json(itinerary);
