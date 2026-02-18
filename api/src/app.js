@@ -38,6 +38,7 @@ app.use('/api/itineraries', itineraryRoutes);
 app.use('/api/interactions', interactionRoutes);
 app.use("/api/destinations", destinationRoutes);
 app.use("/api/recommendations", recommendationRoutes);
+app.use("/api/recommendation", recommendationRoutes);
 //route for testing
 app.get('/health', (_req, res) => res.json({ ok: true }));
 

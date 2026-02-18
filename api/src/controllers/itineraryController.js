@@ -4,17 +4,26 @@ const mongoose = require("mongoose");
 
 exports.createItinerary = async (req, res) => {
   try {
-    const { destinations, totalCost, maxBudget } = req.body;
+    const { destinations, totalCost, maxBudget, budgetMode, isSaved } = req.body;
+    const parsedBudget = Number(maxBudget);
+    const normalizedBudgetMode = ["constrained", "unconstrained"].includes(budgetMode)
+      ? budgetMode
+      : Number.isFinite(parsedBudget)
+        ? "constrained"
+        : "unconstrained";
 
     const itinerary = await Itinerary.create({
       user: req.user.id,
       destinations,
       totalCost,
-      maxBudget
+      maxBudget: Number.isFinite(parsedBudget) ? parsedBudget : null,
+      budgetMode: normalizedBudgetMode,
+      isSaved: Boolean(isSaved)
     });
 
     res.status(201).json(itinerary);
-  } catch {
+  } catch (err) {
+    console.error(err);
     res.status(500).json({ message: "Server error" });
   }
 };
