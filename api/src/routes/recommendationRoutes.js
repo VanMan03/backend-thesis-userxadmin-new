@@ -3,10 +3,11 @@ const router = express.Router();
 
 const auth = require("../middleware/authMiddleware");
 const {
-  getCBFRecommendations
+  getCBFRecommendations,
+  generateItinerary
 } = require("../controllers/recommendationController");
 
-// Content-Based Filtering recommendations
 router.get("/cbf", auth, getCBFRecommendations);
+router.post("/itinerary", auth, generateItinerary);
 
 module.exports = router;

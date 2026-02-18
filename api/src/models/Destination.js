@@ -19,7 +19,12 @@ const DestinationSchema = new mongoose.Schema(
       // e.g. { "Nature Tourism": { ecoTours: 1, wildernessTrekking: 1 } }
     },
 
-    estimatedCost: Number,
+  estimatedCost: {
+  type: Number,
+  required: true,
+  min: 0,
+  default: 0
+  },
 
     location: {
       latitude: {

@@ -25,9 +25,16 @@ const ItinerarySchema = new mongoose.Schema(
     },
 
     maxBudget: {
-      type: Number,
-      required: true
-    },
+  type: Number,
+  required: false
+},
+
+budgetMode: {
+  type: String,
+  enum: ["constrained", "unconstrained"],
+  required: true
+},
+
 
     isSaved: {
       type: Boolean,
