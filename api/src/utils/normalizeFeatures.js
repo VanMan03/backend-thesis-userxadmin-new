@@ -1,4 +1,4 @@
-const VALID_FEATURES = {
+const DEFAULT_VALID_FEATURES = {
   "Nature Tourism": [
     "Eco-Tours",
     "Wilderness Trekking",
@@ -24,7 +24,7 @@ const VALID_FEATURES = {
     "Luxury Cruises",
     "Yachting & Sailing",
     "Ferry Travel",
-    "Water Taxi",
+    "Water Taxi"
   ],
 
   "Leisure and Entertainment Tourism": [
@@ -86,8 +86,48 @@ function normalizeCategories(categoryInput) {
   )];
 }
 
-function normalizeFeatureObjectForCategory(category, selectedForCategory) {
-  const valid = VALID_FEATURES[category] || [];
+function normalizeFeatureList(featureInput) {
+  const list = Array.isArray(featureInput)
+    ? featureInput
+    : typeof featureInput === "string"
+      ? [featureInput]
+      : [];
+
+  return [...new Set(
+    list
+      .filter((item) => typeof item === "string")
+      .map((item) => item.trim())
+      .filter(Boolean)
+  )];
+}
+
+function sanitizeValidFeatures(validFeaturesInput) {
+  if (!validFeaturesInput || typeof validFeaturesInput !== "object") {
+    return {};
+  }
+
+  const sanitized = {};
+
+  Object.entries(validFeaturesInput).forEach(([rawCategory, rawFeatures]) => {
+    if (typeof rawCategory !== "string") return;
+    const category = rawCategory.trim();
+    if (!category) return;
+
+    const features = normalizeFeatureList(rawFeatures);
+    if (!features.length) return;
+
+    sanitized[category] = features;
+  });
+
+  return sanitized;
+}
+
+function getDefaultValidFeatures() {
+  return sanitizeValidFeatures(DEFAULT_VALID_FEATURES);
+}
+
+function normalizeFeatureObjectForCategory(category, selectedForCategory, validFeaturesByCategory) {
+  const valid = validFeaturesByCategory[category] || [];
   const validKeys = new Set(valid.map((item) => toFeatureKey(item)));
   const result = {};
 
@@ -115,15 +155,20 @@ function normalizeFeatureObjectForCategory(category, selectedForCategory) {
   return result;
 }
 
-function normalizeFeatures(categoriesInput, selectedFeatures = {}) {
+function normalizeFeatures(categoriesInput, selectedFeatures = {}, validFeaturesInput = DEFAULT_VALID_FEATURES) {
   const categories = normalizeCategories(categoriesInput);
+  const validFeaturesByCategory = sanitizeValidFeatures(validFeaturesInput);
   const features = {};
 
   if (!categories.length) return features;
 
   if (Array.isArray(selectedFeatures)) {
     const primaryCategory = categories[0];
-    const normalized = normalizeFeatureObjectForCategory(primaryCategory, selectedFeatures);
+    const normalized = normalizeFeatureObjectForCategory(
+      primaryCategory,
+      selectedFeatures,
+      validFeaturesByCategory
+    );
     if (Object.keys(normalized).length) {
       features[primaryCategory] = normalized;
     }
@@ -137,7 +182,8 @@ function normalizeFeatures(categoriesInput, selectedFeatures = {}) {
   categories.forEach((category) => {
     const normalized = normalizeFeatureObjectForCategory(
       category,
-      selectedFeatures[category]
+      selectedFeatures[category],
+      validFeaturesByCategory
     );
     if (Object.keys(normalized).length) {
       features[category] = normalized;
@@ -150,7 +196,11 @@ function normalizeFeatures(categoriesInput, selectedFeatures = {}) {
 
   if (!hasPerCategoryInput) {
     const primaryCategory = categories[0];
-    const normalized = normalizeFeatureObjectForCategory(primaryCategory, selectedFeatures);
+    const normalized = normalizeFeatureObjectForCategory(
+      primaryCategory,
+      selectedFeatures,
+      validFeaturesByCategory
+    );
     if (Object.keys(normalized).length) {
       features[primaryCategory] = normalized;
     }
@@ -159,4 +209,11 @@ function normalizeFeatures(categoriesInput, selectedFeatures = {}) {
   return features;
 }
 
-module.exports = { normalizeFeatures, normalizeCategories };
+module.exports = {
+  DEFAULT_VALID_FEATURES,
+  normalizeFeatures,
+  normalizeCategories,
+  normalizeFeatureList,
+  sanitizeValidFeatures,
+  getDefaultValidFeatures
+};

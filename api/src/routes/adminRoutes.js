@@ -2,10 +2,6 @@ const express = require("express");
 const router = express.Router();
 const upload = require("../middleware/uploadMiddleware");
 
-
-
-
-
 const {
   createDestination,
   getAllDestinationsAdmin,
@@ -15,7 +11,15 @@ const {
   deleteDestinationImage,
   getAllUsers,
   getAllItineraries,
-  getRoutePreview
+  getRoutePreview,
+  getDestinationTaxonomy,
+  replaceDestinationTaxonomy,
+  createDestinationCategory,
+  updateDestinationCategory,
+  deleteDestinationCategory,
+  createDestinationFeature,
+  updateDestinationFeature,
+  deleteDestinationFeature
 } = require("../controllers/adminController");
 
 const auth = require("../middleware/authMiddleware");
@@ -33,6 +37,15 @@ router.put("/destinations/:id", auth, role("admin"), updateDestination);
 router.delete("/destinations/:id", auth, role("admin"), deleteDestination);
 router.get("/destinations", auth, role("admin"), getAllDestinationsAdmin);
 
+router.get("/destination-taxonomy", auth, role("admin"), getDestinationTaxonomy);
+router.put("/destination-taxonomy", auth, role("admin"), replaceDestinationTaxonomy);
+router.post("/destination-taxonomy/categories", auth, role("admin"), createDestinationCategory);
+router.put("/destination-taxonomy/categories/:category", auth, role("admin"), updateDestinationCategory);
+router.delete("/destination-taxonomy/categories/:category", auth, role("admin"), deleteDestinationCategory);
+router.post("/destination-taxonomy/categories/:category/features", auth, role("admin"), createDestinationFeature);
+router.put("/destination-taxonomy/categories/:category/features/:feature", auth, role("admin"), updateDestinationFeature);
+router.delete("/destination-taxonomy/categories/:category/features/:feature", auth, role("admin"), deleteDestinationFeature);
+
 router.get("/users", auth, role("admin"), getAllUsers);
 router.get("/itineraries", auth, role("admin"), getAllItineraries);
 router.post("/routes/preview", auth, role("admin"), getRoutePreview);
@@ -45,14 +58,11 @@ router.post(
   uploadDestinationImage
 );
 
-
 router.delete(
   "/destinations/:id/images/:imageIndex",
   auth,
   role("admin"),
   deleteDestinationImage
 );
-
-
 
 module.exports = router;
