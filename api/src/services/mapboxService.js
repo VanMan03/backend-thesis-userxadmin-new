@@ -2,7 +2,6 @@ const mbxGeocoding = require('@mapbox/mapbox-sdk/services/geocoding');
 const mbxDirections = require('@mapbox/mapbox-sdk/services/directions');
 const mbxMatrix = require('@mapbox/mapbox-sdk/services/matrix');
 const mbxOptimization = require('@mapbox/mapbox-sdk/services/optimization');
-const fetch = require('node-fetch');
 
 function getAccessToken() {
   const accessToken = process.env.MAPBOX_SERVER_TOKEN;

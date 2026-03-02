@@ -14,7 +14,7 @@ The migration provides:
 
 ### 1. New Dependencies
 ```bash
-npm install mapbox-gl @mapbox/mapbox-sdk node-fetch
+npm install mapbox-gl @mapbox/mapbox-sdk
 ```
 
 ### 2. Environment Configuration

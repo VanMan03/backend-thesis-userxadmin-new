@@ -76,7 +76,6 @@ MAPBOX_SERVER_TOKEN=sk.your-server-token-here
 ### Dependencies Installed:
 - `@mapbox/mapbox-sdk` - Mapbox API client
 - `mapbox-gl` - Mapbox GL JS for frontend
-- `node-fetch` - HTTP requests
 
 ## 🧪 Testing
 
