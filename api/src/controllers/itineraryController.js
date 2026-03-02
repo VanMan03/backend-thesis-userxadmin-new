@@ -5,6 +5,9 @@ const {
   normalizeDays,
   splitDestinationsByDays
 } = require("../utils/splitItineraryByDays");
+const {
+  sortDestinationsByDistance
+} = require("../services/mapboxService");
 
 exports.createItinerary = async (req, res) => {
   try {
@@ -85,12 +88,12 @@ const {
 } = require("../services/recommendation/knapsack");
 
 /**
- * Generate itinerary using Hybrid Recommendation + Knapsack Optimization
+ * Generate itinerary using Hybrid Recommendation + Knapsack Optimization + Distance-Based Sorting
  */
 exports.generateItinerary = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { maxBudget, days } = req.body;
+    const { maxBudget, days, userLongitude, userLatitude } = req.body;
     const normalizedDays = normalizeDays(days);
 
     if (!maxBudget) {
@@ -111,24 +114,64 @@ exports.generateItinerary = async (req, res) => {
       });
     }
 
-    // 2) Apply knapsack optimization
-    const optimized = knapsackOptimize(hybridResults, maxBudget);
+    // 2) Apply distance-based sorting if user location is provided
+    let sortedResults = hybridResults;
+    if (userLongitude && userLatitude && process.env.MAPBOX_SERVER_TOKEN) {
+      try {
+        const destinations = hybridResults.map(item => item.destination);
+        const sortedDestinations = await sortDestinationsByDistance({
+          userLongitude: Number(userLongitude),
+          userLatitude: Number(userLatitude),
+          destinations,
+          profile: 'mapbox/driving'
+        });
 
-    // 3) Compute total cost
+        // Map sorted destinations back to hybrid results format
+        const destinationMap = new Map();
+        hybridResults.forEach(item => {
+          destinationMap.set(item.destination._id.toString(), item);
+        });
+
+        sortedResults = sortedDestinations
+          .map(dest => {
+            const originalItem = destinationMap.get(dest._id.toString());
+            if (originalItem) {
+              return {
+                ...originalItem,
+                destination: dest,
+                distanceFromUser: dest.distanceFromUser,
+                durationFromUser: dest.durationFromUser
+              };
+            }
+            return null;
+          })
+          .filter(Boolean);
+      } catch (distanceErr) {
+        console.error("Distance sorting failed, using original order:", distanceErr);
+        // Continue with original hybrid results if distance sorting fails
+      }
+    }
+
+    // 3) Apply knapsack optimization
+    const optimized = knapsackOptimize(sortedResults, maxBudget);
+
+    // 4) Compute total cost
     const totalCost = optimized.reduce(
       (sum, item) => sum + item.destination.estimatedCost,
       0
     );
 
-    // 4) Prepare itinerary destinations
+    // 5) Prepare itinerary destinations
     const destinations = optimized.map((item) => ({
       destination: item.destination._id,
       cost: item.destination.estimatedCost,
-      hybridScore: item.score
+      hybridScore: item.score,
+      distanceFromUser: item.destination.distanceFromUser || null,
+      durationFromUser: item.destination.durationFromUser || null
     }));
     const { dayPlans } = splitDestinationsByDays(destinations, normalizedDays);
 
-    // 5) Save itinerary
+    // 6) Save itinerary
     const itinerary = await Itinerary.create({
       user: userId,
       destinations,

@@ -39,7 +39,14 @@ const DestinationSchema = new mongoose.Schema(
         min: -180,
         max: 180
       },
-      resolvedAddress: String
+      resolvedAddress: {
+        fullAddress: String,
+        barangay: String,
+        city: String,
+        province: String,
+        country: String,
+        postcode: String
+      }
     },
 
     isActive: {

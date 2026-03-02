@@ -15,7 +15,9 @@ const ItinerarySchema = new mongoose.Schema(
           ref: "Destination"
         },
         cost: Number,
-        hybridScore: Number
+        hybridScore: Number,
+        distanceFromUser: Number,
+        durationFromUser: Number
       }
     ],
 
@@ -40,7 +42,9 @@ const ItinerarySchema = new mongoose.Schema(
               ref: "Destination"
             },
             cost: Number,
-            hybridScore: Number
+            hybridScore: Number,
+            distanceFromUser: Number,
+            durationFromUser: Number
           }
         ],
         dayCost: {

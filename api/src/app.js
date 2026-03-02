@@ -10,6 +10,7 @@ const itineraryRoutes = require('./routes/itineraryRoutes');
 const interactionRoutes = require('./routes/userInteractionRoutes');
 const destinationRoutes = require("./routes/destinationRoutes");
 const recommendationRoutes = require("./routes/recommendationRoutes");
+const routeRoutes = require("./routes/routeRoutes");
 
 const app = express();
 
@@ -39,6 +40,7 @@ app.use('/api/interactions', interactionRoutes);
 app.use("/api/destinations", destinationRoutes);
 app.use("/api/recommendations", recommendationRoutes);
 app.use("/api/recommendation", recommendationRoutes);
+app.use("/api/routes", routeRoutes);
 //route for testing
 app.get('/health', (_req, res) => res.json({ ok: true }));
 

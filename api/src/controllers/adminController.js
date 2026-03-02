@@ -14,7 +14,7 @@ const cloudinary = require("../config/cloudinary");
 const {
   getRouteSummary,
   reverseGeocode
-} = require("../services/openRouteService");
+} = require("../services/mapboxService");
 
 const TAXONOMY_KEY = "default";
 
@@ -395,13 +395,13 @@ exports.createDestination = async (req, res) => {
 
     let resolvedAddress = null;
 
-    if (process.env.OPENROUTES_API_KEY || process.env.OPENROUTESERVICE_API_KEY) {
+    if (process.env.MAPBOX_SERVER_TOKEN) {
       try {
         resolvedAddress = await reverseGeocode(parsedLongitude, parsedLatitude);
-      } catch (orsErr) {
+      } catch (mapboxErr) {
         return res.status(502).json({
-          message: "OpenRouteService validation failed",
-          details: orsErr.message
+          message: "Mapbox address resolution failed",
+          details: mapboxErr.message
         });
       }
     }
@@ -460,13 +460,13 @@ exports.updateDestination = async (req, res) => {
       }
 
       let resolvedAddress = null;
-      if (process.env.OPENROUTES_API_KEY || process.env.OPENROUTESERVICE_API_KEY) {
+      if (process.env.MAPBOX_SERVER_TOKEN) {
         try {
           resolvedAddress = await reverseGeocode(parsedLongitude, parsedLatitude);
-        } catch (orsErr) {
+        } catch (mapboxErr) {
           return res.status(502).json({
-            message: "OpenRouteService validation failed",
-            details: orsErr.message
+            message: "Mapbox address resolution failed",
+            details: mapboxErr.message
           });
         }
       }
@@ -688,7 +688,7 @@ exports.getRoutePreview = async (req, res) => {
   } catch (err) {
     console.error("Route preview error:", err);
     res.status(502).json({
-      message: "OpenRouteService route fetch failed",
+      message: "Mapbox route fetch failed",
       details: err.message
     });
   }
