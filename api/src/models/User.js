@@ -10,7 +10,23 @@ const PreferenceSchema = new mongoose.Schema(
     divingAndMarineSportsTourism: { type: Boolean, default: false },
     healthWelnessRetirementTourism: { type: Boolean, default: false },
     MICEAndEventsTourism: { type: Boolean, default: false },
-    educationTourism: { type: Boolean, default: false }
+    educationTourism: { type: Boolean, default: false },
+    interestRanks: { 
+      type: Map, 
+      of: Number, 
+      default: new Map(),
+      validate: {
+        validator: function(ranks) {
+          for (const [key, value] of ranks.entries()) {
+            if (typeof value !== 'number' || value < 1 || value > 9) {
+              return false;
+            }
+          }
+          return true;
+        },
+        message: 'All rank values must be numbers between 1 and 9'
+      }
+    }
   },
   { _id: false }
 );

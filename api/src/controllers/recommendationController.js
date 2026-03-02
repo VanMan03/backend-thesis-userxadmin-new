@@ -151,7 +151,7 @@ exports.generateItinerary = async (req, res) => {
       budgetMode,
       isSaved: false
     };
-    const { dayPlans } = splitDestinationsByDays(itinerary.destinations, normalizedDays);
+    const { dayPlans } = await splitDestinationsByDays(itinerary.destinations, normalizedDays, userId);
     itinerary.days = normalizedDays;
     itinerary.dayPlans = dayPlans;
 

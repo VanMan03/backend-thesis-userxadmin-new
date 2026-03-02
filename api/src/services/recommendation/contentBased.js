@@ -1,4 +1,5 @@
 const Destination = require("../../models/Destination");
+const User = require("../../models/User");
 const UserInteraction = require("../../models/UsersInteraction");
 
 function flattenFeatureVector(features) {
@@ -26,6 +27,75 @@ function flattenFeatureVector(features) {
   });
 
   return flattened;
+}
+
+/**
+ * Calculate rank weight for interest matching
+ * Rank 1 => weight 1.9x (highest priority)
+ * Rank 5 => weight 1.5x 
+ * Rank 9 => weight 1.1x (lowest priority)
+ * No rank => weight 1.0x (default)
+ */
+function calculateRankWeight(rank) {
+  if (!rank || rank < 1 || rank > 9) return 1.0;
+  return 1 + (10 - rank) / 10;
+}
+
+/**
+ * Map user boolean preferences to interest categories
+ */
+function mapPreferencesToInterests(preferences) {
+  const interestMap = {
+    natureTourism: 'Nature Tourism',
+    culturalTourism: 'Cultural Tourism', 
+    sunAndBeachTourism: 'Sun and Beach Tourism',
+    cruiseAndNauticalTourism: 'Cruise and Nautical Tourism',
+    leisureAndEntertainmentTourism: 'Leisure and Entertainment Tourism',
+    divingAndMarineSportsTourism: 'Diving and Marine Sports Tourism',
+    healthWelnessRetirementTourism: 'Health Wellness Retirement Tourism',
+    MICEAndEventsTourism: 'MICE and Events Tourism',
+    educationTourism: 'Education Tourism'
+  };
+
+  const interests = [];
+  for (const [prefKey, prefValue] of Object.entries(preferences)) {
+    if (prefValue === true && interestMap[prefKey]) {
+      interests.push(interestMap[prefKey]);
+    }
+  }
+  return interests;
+}
+
+/**
+ * Calculate content score with rank weighting
+ */
+function calculateContentScore(destinationFeatures, userInterests, interestRanks) {
+  let interestScore = 0;
+  let bestRankWeight = 1.0;
+
+  userInterests.forEach(interest => {
+    if (destinationFeatures[interest]) {
+      const rank = interestRanks && interestRanks.get ? interestRanks.get(interest) : interestRanks?.[interest];
+      const weight = calculateRankWeight(rank);
+      
+      // Apply weight to interest matching score
+      interestScore += (Object.values(destinationFeatures[interest]).reduce((sum, val) => sum + (val || 0), 0)) * weight;
+      
+      // Track best rank for bonus scoring
+      if (weight > bestRankWeight) {
+        bestRankWeight = weight;
+      }
+    }
+  });
+
+  // Add small bonus for destinations matching highest ranked interests
+  const rankBonus = (bestRankWeight - 1.0) * 10;
+  
+  return {
+    baseScore: interestScore,
+    rankBonus,
+    totalScore: interestScore + rankBonus
+  };
 }
 
 /**
@@ -79,26 +149,48 @@ async function buildUserPreferenceVector(userId) {
 }
 
 /**
- * Get content-based recommendations
+ * Get content-based recommendations with rank weighting
  */
 async function getContentBasedRecommendations(userId) {
   const destinations = await Destination.find({ isActive: true });
+  const user = await User.findById(userId);
+  
+  if (!user) {
+    throw new Error('User not found');
+  }
+
+  // Get user interests from boolean preferences
+  const userInterests = mapPreferencesToInterests(user.preferences || {});
+  
+  // Get interaction-based preference vector for collaborative scoring
   const userVector = await buildUserPreferenceVector(userId);
 
   const scoredDestinations = destinations.map((destination) => {
     const destinationFeatures = flattenFeatureVector(destination.features || {});
-    const score = cosineSimilarity(
-      userVector,
-      destinationFeatures
+    
+    // Calculate interaction-based similarity score
+    const interactionScore = cosineSimilarity(userVector, destinationFeatures);
+    
+    // Calculate preference-based score with rank weighting
+    const preferenceScore = calculateContentScore(
+      destination.features || {}, 
+      userInterests, 
+      user.preferences?.interestRanks
     );
+    
+    // Combine scores: 70% interaction-based, 30% preference-based with ranking
+    const combinedScore = (interactionScore * 0.7) + (preferenceScore.totalScore * 0.3);
 
     return {
       destination,
-      score
+      score: combinedScore,
+      interactionScore,
+      preferenceScore: preferenceScore.totalScore,
+      rankBonus: preferenceScore.rankBonus
     };
   });
 
-  // Sort by highest similarity score
+  // Sort by highest combined score
   scoredDestinations.sort((a, b) => b.score - a.score);
 
   return scoredDestinations;
