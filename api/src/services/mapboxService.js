@@ -3,6 +3,13 @@ const mbxDirections = require('@mapbox/mapbox-sdk/services/directions');
 const mbxMatrix = require('@mapbox/mapbox-sdk/services/matrix');
 const mbxOptimization = require('@mapbox/mapbox-sdk/services/optimization');
 
+const MAPBOX_ALLOWED_PROFILES = new Set([
+  "driving",
+  "driving-traffic",
+  "walking",
+  "cycling"
+]);
+
 function getAccessToken() {
   const accessToken = process.env.MAPBOX_SERVER_TOKEN;
   if (!accessToken) {
@@ -16,6 +23,33 @@ const geocodingClient = mbxGeocoding({ accessToken: getAccessToken() });
 const directionsClient = mbxDirections({ accessToken: getAccessToken() });
 const matrixClient = mbxMatrix({ accessToken: getAccessToken() });
 const optimizationClient = mbxOptimization({ accessToken: getAccessToken() });
+
+function normalizeMapboxProfile(rawProfile) {
+  const raw = String(rawProfile ?? "").trim().toLowerCase();
+  const firstToken = raw.split("|")[0].trim();
+  const withoutPrefix = firstToken.startsWith("mapbox/") ? firstToken.slice("mapbox/".length) : firstToken;
+  const profileKey = MAPBOX_ALLOWED_PROFILES.has(withoutPrefix) ? withoutPrefix : "driving";
+  return `mapbox/${profileKey}`;
+}
+
+function wrapMapboxError(prefix, error) {
+  const statusCode =
+    error?.statusCode ||
+    error?.response?.statusCode ||
+    error?.response?.status ||
+    502;
+
+  const apiMessage =
+    error?.response?.body?.message ||
+    error?.body?.message ||
+    error?.message ||
+    "Unknown Mapbox error";
+
+  const wrapped = new Error(`${prefix}: ${apiMessage}`);
+  wrapped.statusCode = statusCode;
+  wrapped.providerMessage = apiMessage;
+  return wrapped;
+}
 
 /**
  * Reverse geocode coordinates to get address components
@@ -84,9 +118,10 @@ async function getRouteSummary({
   profile = 'mapbox/driving'
 }) {
   try {
+    const normalizedProfile = normalizeMapboxProfile(profile);
     const response = await directionsClient
       .getDirections({
-        profile,
+        profile: normalizedProfile,
         waypoints: [
           { coordinates: [startLongitude, startLatitude] },
           { coordinates: [endLongitude, endLatitude] }
@@ -109,7 +144,7 @@ async function getRouteSummary({
     };
   } catch (error) {
     console.error('Mapbox directions error:', error);
-    throw new Error(`Mapbox directions failed: ${error.message}`);
+    throw wrapMapboxError('Mapbox directions failed', error);
   }
 }
 
@@ -124,9 +159,10 @@ async function getDistanceMatrix({
   profile = 'mapbox/driving'
 }) {
   try {
+    const normalizedProfile = normalizeMapboxProfile(profile);
     const response = await matrixClient
       .getMatrix({
-        profile,
+        profile: normalizedProfile,
         points: [...origins, ...destinations],
         sources: origins.map((_, index) => index),
         destinations: destinations.map((_, index) => origins.length + index)
@@ -144,7 +180,7 @@ async function getDistanceMatrix({
     };
   } catch (error) {
     console.error('Mapbox matrix error:', error);
-    throw new Error(`Mapbox matrix failed: ${error.message}`);
+    throw wrapMapboxError('Mapbox matrix failed', error);
   }
 }
 
@@ -226,9 +262,10 @@ async function optimizeRoute({
       ...destinations.map(dest => [dest.location.longitude, dest.location.latitude])
     ];
 
+    const normalizedProfile = normalizeMapboxProfile(profile);
     const response = await optimizationClient
       .getOptimization({
-        profile,
+        profile: normalizedProfile,
         coordinates,
         source: 'first', // Start from first coordinate (user location)
         destination: 'last', // End at last coordinate (if needed)
@@ -257,7 +294,7 @@ async function optimizeRoute({
     };
   } catch (error) {
     console.error('Route optimization error:', error);
-    throw new Error(`Route optimization failed: ${error.message}`);
+    throw wrapMapboxError('Route optimization failed', error);
   }
 }
 
@@ -266,5 +303,6 @@ module.exports = {
   getRouteSummary,
   getDistanceMatrix,
   sortDestinationsByDistance,
-  optimizeRoute
+  optimizeRoute,
+  normalizeMapboxProfile
 };

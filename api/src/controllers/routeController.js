@@ -1,7 +1,8 @@
 const {
   getRouteSummary,
   optimizeRoute,
-  sortDestinationsByDistance
+  sortDestinationsByDistance,
+  normalizeMapboxProfile
 } = require("../services/mapboxService");
 const Destination = require("../models/Destination");
 
@@ -44,18 +45,6 @@ function resolveDestinationId(body) {
     if (body.destination.id) return body.destination.id;
   }
   return undefined;
-}
-
-function normalizeProfile(rawProfile) {
-  const value = typeof rawProfile === "string" ? rawProfile.trim() : "";
-  if (!value) return "mapbox/driving";
-  if (value.startsWith("mapbox/")) return value;
-
-  if (["driving", "walking", "cycling"].includes(value)) {
-    return `mapbox/${value}`;
-  }
-
-  return "mapbox/driving";
 }
 
 function resolveSingleRouteCoordinates(body, query) {
@@ -127,7 +116,7 @@ exports.getSingleRoute = async (req, res) => {
       endLatitude
     } = resolveSingleRouteCoordinates(req.body, req.query);
     const destinationId = resolveDestinationId(req.body);
-    const profile = normalizeProfile(req.body?.profile || req.query?.profile);
+    const profile = normalizeMapboxProfile(req.body?.profile || req.query?.profile);
 
     if (startLongitude === null || startLatitude === null) {
       return res.status(400).json({
@@ -196,9 +185,10 @@ exports.getSingleRoute = async (req, res) => {
     });
   } catch (err) {
     console.error("Single route error:", err);
-    res.status(502).json({
+    const statusCode = Number.isInteger(err?.statusCode) ? err.statusCode : 502;
+    res.status(statusCode >= 400 && statusCode < 500 ? statusCode : 502).json({
       message: "Mapbox route generation failed",
-      details: err.message
+      details: err.providerMessage || err.message
     });
   }
 };
