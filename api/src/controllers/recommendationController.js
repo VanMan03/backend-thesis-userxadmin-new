@@ -3,7 +3,8 @@ const {
 } = require("../services/recommendation/contentBased");
 
 const {
-  getHybridRecommendations
+  getHybridRecommendations,
+  getGroupHybridRecommendations
 } = require("../services/recommendation/hybrid");
 
 const {
@@ -16,6 +17,9 @@ const {
   normalizeDays,
   splitDestinationsByDays
 } = require("../utils/splitItineraryByDays");
+const {
+  normalizeCollaborators
+} = require("../utils/collaboratorUtils");
 
 const FEEDBACK_EVENT_TYPES = new Set([
   "recommendation_requested",
@@ -83,9 +87,22 @@ exports.getCBFRecommendations = async (req, res) => {
 exports.generateItinerary = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { budgetMode, maxBudget, days } = req.body;
+    const {
+      budgetMode,
+      maxBudget,
+      days,
+      travelStyle,
+      collaboratorIds,
+      collaborators
+    } = req.body;
     const parsedBudget = Number(maxBudget);
     const normalizedDays = normalizeDays(days);
+    const collaboratorResult = await normalizeCollaborators({
+      currentUserId: userId,
+      travelStyle,
+      collaboratorIds,
+      collaborators
+    });
 
     if (!["constrained", "unconstrained"].includes(budgetMode)) {
       return res.status(400).json({
@@ -97,7 +114,16 @@ exports.generateItinerary = async (req, res) => {
       return res.status(400).json({ message: "days must be a positive integer" });
     }
 
-    const hybridResults = await getHybridRecommendations(userId);
+    if (!collaboratorResult.ok) {
+      return res.status(400).json({ message: collaboratorResult.message, code: collaboratorResult.code });
+    }
+
+    const participantIds = [userId, ...collaboratorResult.collaboratorIds];
+    const hybridResults = participantIds.length > 1
+      ? await getGroupHybridRecommendations(participantIds, {
+        travelStyle: collaboratorResult.travelStyle
+      })
+      : await getHybridRecommendations(userId);
     let candidateResults = hybridResults;
 
     // Fallback for new users/no interaction history.
@@ -141,6 +167,8 @@ exports.generateItinerary = async (req, res) => {
 
     const itinerary = {
       user: userId,
+      travelStyle: collaboratorResult.travelStyle,
+      collaboratorIds: collaboratorResult.collaboratorIds,
       destinations: finalResults.map((item) => ({
         destination: item.destination._id,
         cost: item.destination.estimatedCost || 0,
@@ -159,6 +187,8 @@ exports.generateItinerary = async (req, res) => {
       mode: budgetMode,
       totalCost,
       days: normalizedDays,
+      travelStyle: collaboratorResult.travelStyle,
+      collaboratorIds: collaboratorResult.collaboratorIds,
       recommendations: finalResults.map((item) => ({
         destination: item.destination,
         score: item.score

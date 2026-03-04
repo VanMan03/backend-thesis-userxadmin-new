@@ -70,6 +70,19 @@ budgetMode: {
   required: true
 },
 
+    travelStyle: {
+      type: String,
+      enum: ["solo", "couple", "friends", "family", "family_group", "team"],
+      default: "solo"
+    },
+
+    collaboratorIds: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User"
+      }
+    ],
+
 
     isSaved: {
       type: Boolean,
@@ -78,5 +91,7 @@ budgetMode: {
   },
   { timestamps: true }
 );
+
+ItinerarySchema.index({ user: 1, collaboratorIds: 1 });
 
 module.exports = mongoose.model("Itinerary", ItinerarySchema);

@@ -8,10 +8,23 @@ const {
 const {
   sortDestinationsByDistance
 } = require("../services/mapboxService");
+const {
+  normalizeCollaborators
+} = require("../utils/collaboratorUtils");
 
 exports.createItinerary = async (req, res) => {
   try {
-    const { destinations, totalCost, maxBudget, budgetMode, isSaved, days } = req.body;
+    const {
+      destinations,
+      totalCost,
+      maxBudget,
+      budgetMode,
+      isSaved,
+      days,
+      travelStyle,
+      collaboratorIds,
+      collaborators
+    } = req.body;
     const parsedBudget = Number(maxBudget);
     const normalizedDays = normalizeDays(days);
     const normalizedBudgetMode = ["constrained", "unconstrained"].includes(budgetMode)
@@ -19,9 +32,19 @@ exports.createItinerary = async (req, res) => {
       : Number.isFinite(parsedBudget)
         ? "constrained"
         : "unconstrained";
+    const collaboratorResult = await normalizeCollaborators({
+      currentUserId: req.user.id,
+      travelStyle,
+      collaboratorIds,
+      collaborators
+    });
 
     if (days !== undefined && normalizedDays === null) {
       return res.status(400).json({ message: "days must be a positive integer" });
+    }
+
+    if (!collaboratorResult.ok) {
+      return res.status(400).json({ message: collaboratorResult.message, code: collaboratorResult.code });
     }
 
     const destinationList = Array.isArray(destinations) ? destinations : [];
@@ -35,6 +58,8 @@ exports.createItinerary = async (req, res) => {
       totalCost,
       maxBudget: Number.isFinite(parsedBudget) ? parsedBudget : null,
       budgetMode: normalizedBudgetMode,
+      travelStyle: collaboratorResult.travelStyle,
+      collaboratorIds: collaboratorResult.collaboratorIds,
       isSaved: Boolean(isSaved)
     });
 
@@ -47,9 +72,12 @@ exports.createItinerary = async (req, res) => {
 
 exports.getUserItineraries = async (req, res) => {
   try {
-    const itineraries = await Itinerary.find({ user: req.user.id })
+    const itineraries = await Itinerary.find({
+      $or: [{ user: req.user.id }, { collaboratorIds: req.user.id }]
+    })
       .populate("destinations.destination")
-      .populate("dayPlans.destinations.destination");
+      .populate("dayPlans.destinations.destination")
+      .populate("collaboratorIds", "_id fullName email");
 
     res.json(itineraries);
   } catch {
@@ -65,10 +93,7 @@ exports.deleteUserItinerary = async (req, res) => {
       return res.status(400).json({ message: "Invalid itinerary ID" });
     }
 
-    const deletedItinerary = await Itinerary.findOneAndDelete({
-      _id: id,
-      user: req.user.id
-    });
+    const deletedItinerary = await Itinerary.findOneAndDelete({ _id: id, user: req.user.id });
 
     if (!deletedItinerary) {
       return res.status(404).json({ message: "Itinerary not found" });
@@ -81,7 +106,8 @@ exports.deleteUserItinerary = async (req, res) => {
 };
 
 const {
-  getHybridRecommendations
+  getHybridRecommendations,
+  getGroupHybridRecommendations
 } = require("../services/recommendation/hybrid");
 const {
   knapsackOptimize
@@ -93,8 +119,22 @@ const {
 exports.generateItinerary = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { maxBudget, days, userLongitude, userLatitude } = req.body;
+    const {
+      maxBudget,
+      days,
+      userLongitude,
+      userLatitude,
+      travelStyle,
+      collaboratorIds,
+      collaborators
+    } = req.body;
     const normalizedDays = normalizeDays(days);
+    const collaboratorResult = await normalizeCollaborators({
+      currentUserId: req.user.id,
+      travelStyle,
+      collaboratorIds,
+      collaborators
+    });
 
     if (!maxBudget) {
       return res.status(400).json({ message: "maxBudget is required" });
@@ -104,8 +144,17 @@ exports.generateItinerary = async (req, res) => {
       return res.status(400).json({ message: "days must be a positive integer" });
     }
 
+    if (!collaboratorResult.ok) {
+      return res.status(400).json({ message: collaboratorResult.message, code: collaboratorResult.code });
+    }
+
     // 1) Get hybrid recommendations
-    const hybridResults = await getHybridRecommendations(userId);
+    const participantIds = [userId, ...collaboratorResult.collaboratorIds];
+    const hybridResults = participantIds.length > 1
+      ? await getGroupHybridRecommendations(participantIds, {
+        travelStyle: collaboratorResult.travelStyle
+      })
+      : await getHybridRecommendations(userId);
 
     if (!hybridResults.length) {
       return res.status(200).json({
@@ -179,6 +228,8 @@ exports.generateItinerary = async (req, res) => {
       dayPlans,
       totalCost,
       maxBudget,
+      travelStyle: collaboratorResult.travelStyle,
+      collaboratorIds: collaboratorResult.collaboratorIds,
       isSaved: true,
       budgetMode: "constrained"
     });
