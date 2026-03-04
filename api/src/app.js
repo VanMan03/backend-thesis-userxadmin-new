@@ -11,6 +11,7 @@ const interactionRoutes = require('./routes/userInteractionRoutes');
 const destinationRoutes = require("./routes/destinationRoutes");
 const recommendationRoutes = require("./routes/recommendationRoutes");
 const routeRoutes = require("./routes/routeRoutes");
+const collaborationRoutes = require("./routes/collaborationRoutes");
 
 const app = express();
 
@@ -41,6 +42,7 @@ app.use("/api/destinations", destinationRoutes);
 app.use("/api/recommendations", recommendationRoutes);
 app.use("/api/recommendation", recommendationRoutes);
 app.use("/api/routes", routeRoutes);
+app.use("/api/collaboration", collaborationRoutes);
 //route for testing
 app.get('/health', (_req, res) => res.json({ ok: true }));
 

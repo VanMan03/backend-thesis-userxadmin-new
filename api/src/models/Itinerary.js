@@ -8,6 +8,12 @@ const ItinerarySchema = new mongoose.Schema(
       required: true
     },
 
+    name: {
+      type: String,
+      trim: true,
+      default: null
+    },
+
     destinations: [
       {
         destination: {
