@@ -53,6 +53,36 @@ Content-Type: application/json
 }
 ```
 
+Also accepted payload variants:
+
+```json
+{
+  "profile": "driving",
+  "originLongitude": 124.133,
+  "originLatitude": 12.767,
+  "destinationLongitude": 124.12345,
+  "destinationLatitude": 12.6789
+}
+```
+
+```json
+{
+  "profile": "walking",
+  "coordinates": [
+    [124.133, 12.767],
+    [124.12345, 12.6789]
+  ]
+}
+```
+
+```json
+{
+  "profile": "cycling",
+  "origin": { "longitude": 124.133, "latitude": 12.767 },
+  "destination": { "longitude": 124.12345, "latitude": 12.6789 }
+}
+```
+
 #### Get Optimized Route
 ```http
 POST /api/routes/optimize

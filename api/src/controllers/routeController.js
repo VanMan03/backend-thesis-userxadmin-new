@@ -46,59 +46,153 @@ function resolveDestinationId(body) {
   return undefined;
 }
 
+function normalizeProfile(rawProfile) {
+  const value = typeof rawProfile === "string" ? rawProfile.trim() : "";
+  if (!value) return "mapbox/driving";
+  if (value.startsWith("mapbox/")) return value;
+
+  if (["driving", "walking", "cycling"].includes(value)) {
+    return `mapbox/${value}`;
+  }
+
+  return "mapbox/driving";
+}
+
+function resolveSingleRouteCoordinates(body, query) {
+  let startLongitude = toNumber(resolveCoordinate(body, query, "userLongitude", [
+    "longitude",
+    "lng",
+    "startLongitude",
+    "startLng",
+    "originLongitude"
+  ]));
+  let startLatitude = toNumber(resolveCoordinate(body, query, "userLatitude", [
+    "latitude",
+    "lat",
+    "startLatitude",
+    "startLat",
+    "originLatitude"
+  ]));
+  let endLongitude = toNumber(resolveCoordinate(body, query, "destinationLongitude", [
+    "endLongitude",
+    "endLng"
+  ]));
+  let endLatitude = toNumber(resolveCoordinate(body, query, "destinationLatitude", [
+    "endLatitude",
+    "endLat"
+  ]));
+
+  if (startLongitude === null || startLatitude === null) {
+    if (body?.origin && typeof body.origin === "object") {
+      startLongitude = toNumber(body.origin.longitude);
+      startLatitude = toNumber(body.origin.latitude);
+    }
+  }
+
+  if (endLongitude === null || endLatitude === null) {
+    if (body?.destination && typeof body.destination === "object") {
+      endLongitude = toNumber(body.destination.longitude);
+      endLatitude = toNumber(body.destination.latitude);
+    }
+  }
+
+  if ((startLongitude === null || startLatitude === null || endLongitude === null || endLatitude === null)
+    && Array.isArray(body?.coordinates)
+    && body.coordinates.length >= 2
+    && Array.isArray(body.coordinates[0])
+    && Array.isArray(body.coordinates[1])) {
+    startLongitude = toNumber(body.coordinates[0][0]);
+    startLatitude = toNumber(body.coordinates[0][1]);
+    endLongitude = toNumber(body.coordinates[1][0]);
+    endLatitude = toNumber(body.coordinates[1][1]);
+  }
+
+  return {
+    startLongitude,
+    startLatitude,
+    endLongitude,
+    endLatitude
+  };
+}
+
 /**
  * Get route between user location and a single destination
  */
 exports.getSingleRoute = async (req, res) => {
   try {
-    const rawUserLongitude = resolveCoordinate(req.body, req.query, "userLongitude", [
-      "longitude",
-      "lng",
-      "startLongitude",
-      "startLng"
-    ]);
-    const rawUserLatitude = resolveCoordinate(req.body, req.query, "userLatitude", [
-      "latitude",
-      "lat",
-      "startLatitude",
-      "startLat"
-    ]);
+    const {
+      startLongitude,
+      startLatitude,
+      endLongitude,
+      endLatitude
+    } = resolveSingleRouteCoordinates(req.body, req.query);
     const destinationId = resolveDestinationId(req.body);
-    const profile = req.body?.profile || req.query?.profile || "mapbox/driving";
-    const userLongitude = toNumber(rawUserLongitude);
-    const userLatitude = toNumber(rawUserLatitude);
+    const profile = normalizeProfile(req.body?.profile || req.query?.profile);
 
-    if (userLongitude === null || userLatitude === null || !destinationId) {
+    if (startLongitude === null || startLatitude === null) {
       return res.status(400).json({
-        message: "Invalid payload. userLongitude, userLatitude, and destinationId are required",
+        message: "Invalid payload. Origin coordinates are required",
         expected: {
-          userLongitude: "number",
-          userLatitude: "number",
-          destinationId: "string"
+          origin: [
+            { userLongitude: "number", userLatitude: "number" },
+            { originLongitude: "number", originLatitude: "number" },
+            { origin: { longitude: "number", latitude: "number" } },
+            { coordinates: "[[originLng, originLat], [destinationLng, destinationLat]]" }
+          ]
         }
       });
     }
 
-    const destination = await Destination.findById(destinationId);
-    if (!destination) {
-      return res.status(404).json({ message: "Destination not found" });
+    let resolvedEndLongitude = endLongitude;
+    let resolvedEndLatitude = endLatitude;
+    let destination = null;
+
+    if ((resolvedEndLongitude === null || resolvedEndLatitude === null) && destinationId) {
+      destination = await Destination.findById(destinationId);
+      if (!destination) {
+        return res.status(404).json({ message: "Destination not found" });
+      }
+
+      resolvedEndLongitude = toNumber(destination.location.longitude);
+      resolvedEndLatitude = toNumber(destination.location.latitude);
+    }
+
+    if (resolvedEndLongitude === null || resolvedEndLatitude === null) {
+      return res.status(400).json({
+        message: "Invalid payload. Provide destinationId or destination coordinates",
+        expected: {
+          destination: [
+            { destinationId: "string" },
+            { destinationLongitude: "number", destinationLatitude: "number" },
+            { destination: { longitude: "number", latitude: "number" } },
+            { coordinates: "[[originLng, originLat], [destinationLng, destinationLat]]" }
+          ]
+        }
+      });
     }
 
     const route = await getRouteSummary({
-      startLongitude: userLongitude,
-      startLatitude: userLatitude,
-      endLongitude: destination.location.longitude,
-      endLatitude: destination.location.latitude,
+      startLongitude,
+      startLatitude,
+      endLongitude: resolvedEndLongitude,
+      endLatitude: resolvedEndLatitude,
       profile
     });
 
     res.json({
       route,
-      destination: {
-        id: destination._id,
-        name: destination.name,
-        location: destination.location
-      }
+      destination: destination
+        ? {
+          id: destination._id,
+          name: destination.name,
+          location: destination.location
+        }
+        : {
+          location: {
+            longitude: resolvedEndLongitude,
+            latitude: resolvedEndLatitude
+          }
+        }
     });
   } catch (err) {
     console.error("Single route error:", err);
