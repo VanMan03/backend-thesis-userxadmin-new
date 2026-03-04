@@ -5,21 +5,77 @@ const {
 } = require("../services/mapboxService");
 const Destination = require("../models/Destination");
 
+function toNumber(value) {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function resolveCoordinate(body, query, primaryKey, aliases = []) {
+  const sources = [body || {}, query || {}];
+  for (const source of sources) {
+    if (Object.prototype.hasOwnProperty.call(source, primaryKey)) {
+      return source[primaryKey];
+    }
+
+    for (const alias of aliases) {
+      if (Object.prototype.hasOwnProperty.call(source, alias)) {
+        return source[alias];
+      }
+    }
+  }
+
+  return undefined;
+}
+
+function resolveDestinationId(body) {
+  if (!body || typeof body !== "object") {
+    return undefined;
+  }
+
+  if (body.destinationId) return body.destinationId;
+  if (body.destinationID) return body.destinationID;
+  if (body.destination) {
+    if (typeof body.destination === "string") return body.destination;
+    if (body.destination._id) return body.destination._id;
+    if (body.destination.id) return body.destination.id;
+  }
+  return undefined;
+}
+
 /**
  * Get route between user location and a single destination
  */
 exports.getSingleRoute = async (req, res) => {
   try {
-    const {
-      userLongitude,
-      userLatitude,
-      destinationId,
-      profile = 'mapbox/driving'
-    } = req.body;
+    const rawUserLongitude = resolveCoordinate(req.body, req.query, "userLongitude", [
+      "longitude",
+      "lng",
+      "startLongitude",
+      "startLng"
+    ]);
+    const rawUserLatitude = resolveCoordinate(req.body, req.query, "userLatitude", [
+      "latitude",
+      "lat",
+      "startLatitude",
+      "startLat"
+    ]);
+    const destinationId = resolveDestinationId(req.body);
+    const profile = req.body?.profile || req.query?.profile || "mapbox/driving";
+    const userLongitude = toNumber(rawUserLongitude);
+    const userLatitude = toNumber(rawUserLatitude);
 
-    if (!userLongitude || !userLatitude || !destinationId) {
+    if (userLongitude === null || userLatitude === null || !destinationId) {
       return res.status(400).json({
-        message: "userLongitude, userLatitude, and destinationId are required"
+        message: "Invalid payload. userLongitude, userLatitude, and destinationId are required",
+        expected: {
+          userLongitude: "number",
+          userLatitude: "number",
+          destinationId: "string"
+        }
       });
     }
 
@@ -29,8 +85,8 @@ exports.getSingleRoute = async (req, res) => {
     }
 
     const route = await getRouteSummary({
-      startLongitude: Number(userLongitude),
-      startLatitude: Number(userLatitude),
+      startLongitude: userLongitude,
+      startLatitude: userLatitude,
       endLongitude: destination.location.longitude,
       endLatitude: destination.location.latitude,
       profile
