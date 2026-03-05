@@ -399,8 +399,9 @@ exports.createDestination = async (req, res) => {
       try {
         resolvedAddress = await reverseGeocode(parsedLongitude, parsedLatitude);
       } catch (mapboxErr) {
-        return res.status(502).json({
-          message: "Mapbox address resolution failed",
+        console.warn("Create destination: Mapbox address resolution failed", {
+          longitude: parsedLongitude,
+          latitude: parsedLatitude,
           details: mapboxErr.message
         });
       }
@@ -463,8 +464,10 @@ exports.updateDestination = async (req, res) => {
         try {
           resolvedAddress = await reverseGeocode(parsedLongitude, parsedLatitude);
         } catch (mapboxErr) {
-          return res.status(502).json({
-            message: "Mapbox address resolution failed",
+          console.warn("Update destination: Mapbox address resolution failed", {
+            destinationId: req.params.id,
+            longitude: parsedLongitude,
+            latitude: parsedLatitude,
             details: mapboxErr.message
           });
         }
