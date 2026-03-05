@@ -105,6 +105,7 @@ async function upsertRatingFromFeedbackEvent(event, fallbackUserId = null) {
 
   const destinationId = event.destinationId || event.metadata?.destinationId || null;
   const rating = event.metadata?.rating;
+  const cleared = event.metadata?.cleared === true || rating === 0;
   const userId = event.userId || fallbackUserId || null;
 
   if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
@@ -119,7 +120,7 @@ async function upsertRatingFromFeedbackEvent(event, fallbackUserId = null) {
     throw err;
   }
 
-  if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+  if (!cleared && (!Number.isInteger(rating) || rating < 1 || rating > 5)) {
     const err = new Error("destination_rated event requires metadata.rating between 1 and 5");
     err.status = 400;
     throw err;
@@ -130,6 +131,11 @@ async function upsertRatingFromFeedbackEvent(event, fallbackUserId = null) {
     const err = new Error("destination_rated event destination not found");
     err.status = 400;
     throw err;
+  }
+
+  if (cleared) {
+    await Rating.findOneAndDelete({ user: userId, destination: destinationId });
+    return;
   }
 
   await Rating.findOneAndUpdate(

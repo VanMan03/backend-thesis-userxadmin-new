@@ -99,3 +99,32 @@ exports.getMyDestinationRatings = async (req, res) => {
     return res.status(500).json({ message: "Server error" });
   }
 };
+
+exports.clearDestinationRating = async (req, res) => {
+  try {
+    const { destinationId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(destinationId)) {
+      return res.status(400).json({ message: "Invalid destination ID" });
+    }
+
+    const destination = await Destination.findOne({
+      _id: destinationId,
+      isActive: true
+    }).select("_id");
+
+    if (!destination) {
+      return res.status(404).json({ message: "Destination not found" });
+    }
+
+    await Rating.findOneAndDelete({
+      user: req.user.id,
+      destination: destinationId
+    });
+
+    return res.status(204).send();
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
