@@ -18,11 +18,21 @@ function getAccessToken() {
   return accessToken;
 }
 
-// Initialize Mapbox clients
-const geocodingClient = mbxGeocoding({ accessToken: getAccessToken() });
-const directionsClient = mbxDirections({ accessToken: getAccessToken() });
-const matrixClient = mbxMatrix({ accessToken: getAccessToken() });
-const optimizationClient = mbxOptimization({ accessToken: getAccessToken() });
+function getGeocodingClient() {
+  return mbxGeocoding({ accessToken: getAccessToken() });
+}
+
+function getDirectionsClient() {
+  return mbxDirections({ accessToken: getAccessToken() });
+}
+
+function getMatrixClient() {
+  return mbxMatrix({ accessToken: getAccessToken() });
+}
+
+function getOptimizationClient() {
+  return mbxOptimization({ accessToken: getAccessToken() });
+}
 
 function normalizeMapboxProfile(rawProfile) {
   const raw = String(rawProfile ?? "").trim().toLowerCase();
@@ -59,7 +69,7 @@ function wrapMapboxError(prefix, error) {
  */
 async function reverseGeocode(longitude, latitude) {
   try {
-    const response = await geocodingClient
+    const response = await getGeocodingClient()
       .reverseGeocode({
         query: [longitude, latitude],
         limit: 1,
@@ -119,7 +129,7 @@ async function getRouteSummary({
 }) {
   try {
     const normalizedProfile = normalizeMapboxProfile(profile);
-    const response = await directionsClient
+    const response = await getDirectionsClient()
       .getDirections({
         profile: normalizedProfile,
         waypoints: [
@@ -160,7 +170,7 @@ async function getDistanceMatrix({
 }) {
   try {
     const normalizedProfile = normalizeMapboxProfile(profile);
-    const response = await matrixClient
+    const response = await getMatrixClient()
       .getMatrix({
         profile: normalizedProfile,
         points: [...origins, ...destinations],
@@ -263,7 +273,7 @@ async function optimizeRoute({
     ];
 
     const normalizedProfile = normalizeMapboxProfile(profile);
-    const response = await optimizationClient
+    const response = await getOptimizationClient()
       .getOptimization({
         profile: normalizedProfile,
         coordinates,

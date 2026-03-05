@@ -1,6 +1,5 @@
 const express = require("express");
 const router = express.Router();
-const upload = require("../middleware/uploadMiddleware");
 
 const {
   createDestination,
@@ -29,7 +28,6 @@ router.post(
   "/destinations",
   auth,
   role("admin"),
-  upload.array("images", 4),
   createDestination
 );
 
@@ -54,7 +52,6 @@ router.post(
   "/destinations/:id/images",
   auth,
   role("admin"),
-  upload.array("images", 4),
   uploadDestinationImage
 );
 

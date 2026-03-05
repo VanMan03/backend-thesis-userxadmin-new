@@ -91,10 +91,9 @@ if (require.main === module) {
     console.error('❌ MAPBOX_SERVER_TOKEN environment variable is required');
     console.log('Please set it and try again:');
     console.log('export MAPBOX_SERVER_TOKEN=your_token_here');
-    process.exit(1);
+  } else {
+    testMapboxServices();
   }
-
-  testMapboxServices();
 }
 
 module.exports = { testMapboxServices, TEST_COORDS, mockDestinations };

@@ -10,8 +10,12 @@ try {
   const mapboxGl = require('mapbox-gl');
   console.log('✅ mapbox-gl installed');
   
-  const nodeFetch = require('node-fetch');
-  console.log('✅ node-fetch installed');
+  try {
+    require('node-fetch');
+    console.log('✅ node-fetch installed');
+  } catch {
+    console.log('ℹ️ node-fetch not installed (optional on modern Node.js)');
+  }
   console.log('');
 
   // Test 2: Check if service files exist and can be loaded (with mock token)

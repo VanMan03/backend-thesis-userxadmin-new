@@ -406,10 +406,9 @@ exports.createDestination = async (req, res) => {
       }
     }
 
-    const uploadedImages = (req.files || []).map((file) => ({
-      url: file.path || file.secure_url,
-      publicId: file.filename || file.public_id
-    }));
+    const uploadedImages = Array.isArray(req.body.images)
+      ? req.body.images
+      : [];
 
     const destination = await Destination.create({
       name,
@@ -612,14 +611,13 @@ exports.uploadDestinationImage = async (req, res) => {
   try {
     const { id } = req.params;
 
-    if (!req.files || req.files.length === 0) {
-      return res.status(400).json({ message: "No images uploaded" });
-    }
+    const uploadedImages = Array.isArray(req.body.images)
+      ? req.body.images
+      : [];
 
-    const uploadedImages = req.files.map((file) => ({
-      url: file.path || file.secure_url,
-      publicId: file.filename || file.public_id
-    }));
+    if (!uploadedImages.length) {
+      return res.status(400).json({ message: "No images provided" });
+    }
 
     const destination = await Destination.findByIdAndUpdate(
       id,
