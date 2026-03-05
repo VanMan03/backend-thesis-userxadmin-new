@@ -12,6 +12,7 @@ const destinationRoutes = require("./routes/destinationRoutes");
 const recommendationRoutes = require("./routes/recommendationRoutes");
 const routeRoutes = require("./routes/routeRoutes");
 const collaborationRoutes = require("./routes/collaborationRoutes");
+const { createSystemLog } = require("./services/systemLogService");
 
 const app = express();
 
@@ -48,6 +49,16 @@ app.get('/health', (_req, res) => res.json({ ok: true }));
 
 app.use((err, _req, res, _next) => {
   console.error(err);
+  void createSystemLog({
+    severity: "Error",
+    event: "Unhandled server error",
+    description: err.message || "Unknown server error",
+    status: "Failed",
+    metadata: {
+      path: _req.originalUrl,
+      method: _req.method
+    }
+  });
   res.status(500).json({ message: "Server error" });
 });
 

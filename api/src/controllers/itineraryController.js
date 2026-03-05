@@ -11,6 +11,20 @@ const {
 const {
   normalizeCollaborators
 } = require("../utils/collaboratorUtils");
+const { createSystemLog } = require("../services/systemLogService");
+
+async function logItineraryEvent(req, payload) {
+  await createSystemLog({
+    ...payload,
+    actorId: req.user?.id || null,
+    actorRole: req.user?.role || "user",
+    metadata: {
+      path: req.originalUrl,
+      method: req.method,
+      ...(payload.metadata || {})
+    }
+  });
+}
 
 exports.createItinerary = async (req, res) => {
   try {
@@ -40,10 +54,23 @@ exports.createItinerary = async (req, res) => {
     });
 
     if (days !== undefined && normalizedDays === null) {
+      await logItineraryEvent(req, {
+        severity: "Warning",
+        event: "Itinerary validation failed",
+        description: "days must be a positive integer",
+        status: "Failed"
+      });
       return res.status(400).json({ message: "days must be a positive integer" });
     }
 
     if (!collaboratorResult.ok) {
+      await logItineraryEvent(req, {
+        severity: "Warning",
+        event: "Itinerary validation failed",
+        description: collaboratorResult.message,
+        status: "Failed",
+        metadata: { code: collaboratorResult.code }
+      });
       return res.status(400).json({ message: collaboratorResult.message, code: collaboratorResult.code });
     }
 
@@ -63,9 +90,23 @@ exports.createItinerary = async (req, res) => {
       isSaved: Boolean(isSaved)
     });
 
+    await logItineraryEvent(req, {
+      severity: "Success",
+      event: "Itinerary created",
+      description: "User created itinerary.",
+      status: "Success",
+      metadata: { itineraryId: itinerary._id.toString() }
+    });
+
     res.status(201).json(itinerary);
   } catch (err) {
     console.error(err);
+    await logItineraryEvent(req, {
+      severity: "Error",
+      event: "Itinerary creation failed",
+      description: err.message,
+      status: "Failed"
+    });
     res.status(500).json({ message: "Server error" });
   }
 };
@@ -90,17 +131,46 @@ exports.deleteUserItinerary = async (req, res) => {
     const { id } = req.params;
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
+      await logItineraryEvent(req, {
+        severity: "Warning",
+        event: "Itinerary validation failed",
+        description: "Invalid itinerary ID",
+        status: "Failed",
+        metadata: { itineraryId: id }
+      });
       return res.status(400).json({ message: "Invalid itinerary ID" });
     }
 
     const deletedItinerary = await Itinerary.findOneAndDelete({ _id: id, user: req.user.id });
 
     if (!deletedItinerary) {
+      await logItineraryEvent(req, {
+        severity: "Warning",
+        event: "Itinerary delete failed",
+        description: "Itinerary not found",
+        status: "Failed",
+        metadata: { itineraryId: id }
+      });
       return res.status(404).json({ message: "Itinerary not found" });
     }
 
+    await logItineraryEvent(req, {
+      severity: "Info",
+      event: "Itinerary deleted",
+      description: "User deleted itinerary.",
+      status: "Success",
+      metadata: { itineraryId: id }
+    });
+
     res.json({ message: "Itinerary deleted successfully" });
-  } catch {
+  } catch (err) {
+    await logItineraryEvent(req, {
+      severity: "Error",
+      event: "Itinerary delete failed",
+      description: err.message,
+      status: "Failed",
+      metadata: { itineraryId: req.params.id }
+    });
     res.status(500).json({ message: "Server error" });
   }
 };
@@ -137,14 +207,33 @@ exports.generateItinerary = async (req, res) => {
     });
 
     if (!maxBudget) {
+      await logItineraryEvent(req, {
+        severity: "Warning",
+        event: "Generate itinerary validation failed",
+        description: "maxBudget is required",
+        status: "Failed"
+      });
       return res.status(400).json({ message: "maxBudget is required" });
     }
 
     if (days !== undefined && normalizedDays === null) {
+      await logItineraryEvent(req, {
+        severity: "Warning",
+        event: "Generate itinerary validation failed",
+        description: "days must be a positive integer",
+        status: "Failed"
+      });
       return res.status(400).json({ message: "days must be a positive integer" });
     }
 
     if (!collaboratorResult.ok) {
+      await logItineraryEvent(req, {
+        severity: "Warning",
+        event: "Generate itinerary validation failed",
+        description: collaboratorResult.message,
+        status: "Failed",
+        metadata: { code: collaboratorResult.code }
+      });
       return res.status(400).json({ message: collaboratorResult.message, code: collaboratorResult.code });
     }
 
@@ -234,9 +323,23 @@ exports.generateItinerary = async (req, res) => {
       budgetMode: "constrained"
     });
 
+    await logItineraryEvent(req, {
+      severity: "Success",
+      event: "Itinerary generated",
+      description: "User generated itinerary with recommendations.",
+      status: "Success",
+      metadata: { itineraryId: itinerary._id.toString() }
+    });
+
     res.status(201).json(itinerary);
   } catch (err) {
     console.error(err);
+    await logItineraryEvent(req, {
+      severity: "Error",
+      event: "Generate itinerary failed",
+      description: err.message,
+      status: "Failed"
+    });
     res.status(500).json({ message: "Server error" });
   }
 };

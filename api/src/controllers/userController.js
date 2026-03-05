@@ -1,8 +1,22 @@
 //This controller manages user profile and preferences
 const User = require("../models/User");
+const { createSystemLog } = require("../services/systemLogService");
 
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+async function logUserEvent(req, payload) {
+  await createSystemLog({
+    ...payload,
+    actorId: req.user?.id || null,
+    actorRole: req.user?.role || "user",
+    metadata: {
+      path: req.originalUrl,
+      method: req.method,
+      ...(payload.metadata || {})
+    }
+  });
 }
 
 exports.getProfile = async (req, res) => {
@@ -31,6 +45,12 @@ exports.updatePreferences = async (req, res) => {
       if (preferences.interestRanks instanceof Map) {
         for (const [key, value] of preferences.interestRanks.entries()) {
           if (typeof value !== 'number' || value < 1 || value > 9) {
+            await logUserEvent(req, {
+              severity: "Warning",
+              event: "Preference validation failed",
+              description: `Invalid rank for ${key}`,
+              status: "Failed"
+            });
             return res.status(400).json({ 
               message: `Invalid rank value for ${key}. Ranks must be numbers between 1 and 9.` 
             });
@@ -40,10 +60,22 @@ exports.updatePreferences = async (req, res) => {
     }
 
     await User.findByIdAndUpdate(req.user.id, { preferences });
+    await logUserEvent(req, {
+      severity: "Info",
+      event: "Preferences updated",
+      description: "User updated preferences.",
+      status: "Success"
+    });
 
     res.json({ message: "Preferences updated successfully" });
   } catch (error) {
     console.error('Error updating preferences:', error);
+    await logUserEvent(req, {
+      severity: "Error",
+      event: "Preferences update failed",
+      description: error.message,
+      status: "Failed"
+    });
     res.status(500).json({ message: "Server error" });
   }
 };

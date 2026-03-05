@@ -10,6 +10,7 @@ const {
   deleteDestinationImage,
   getAllUsers,
   getAllItineraries,
+  getSystemLogs,
   getRoutePreview,
   getDestinationTaxonomy,
   replaceDestinationTaxonomy,
@@ -47,6 +48,7 @@ router.delete("/destination-taxonomy/categories/:category/features/:feature", au
 
 router.get("/users", auth, role("admin"), getAllUsers);
 router.get("/itineraries", auth, role("admin"), getAllItineraries);
+router.get("/logs", auth, role("admin"), getSystemLogs);
 router.post("/routes/preview", auth, role("admin"), getRoutePreview);
 router.post("/cloudinary/signature", auth, role("admin"), getCloudinaryUploadSignature);
 

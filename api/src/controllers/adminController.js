@@ -3,6 +3,7 @@ const Destination = require("../models/Destination");
 const DestinationTaxonomy = require("../models/DestinationTaxonomy");
 const User = require("../models/User");
 const Itinerary = require("../models/Itinerary");
+const SystemLog = require("../models/SystemLog");
 const {
   normalizeFeatures,
   normalizeCategories,
@@ -10,6 +11,10 @@ const {
   sanitizeValidFeatures,
   getDefaultValidFeatures
 } = require("../utils/normalizeFeatures");
+const {
+  createSystemLog,
+  allowedSeverities
+} = require("../services/systemLogService");
 const cloudinary = require("../config/cloudinary");
 const {
   getRouteSummary,
@@ -17,6 +22,7 @@ const {
 } = require("../services/mapboxService");
 
 const TAXONOMY_KEY = "default";
+const allowedLogStatuses = new Set(["Success", "Warning", "Failed"]);
 
 function parseCoordinate(value) {
   const parsed = Number(value);
@@ -31,6 +37,33 @@ function parseTaxonomyKey(value) {
 function filterSupportedCategories(categories, validFeaturesMap) {
   const allowed = new Set(Object.keys(validFeaturesMap));
   return categories.filter((item) => allowed.has(item));
+}
+
+function parseDateInput(value) {
+  if (typeof value !== "string" || !value.trim()) return null;
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function parsePositiveInt(value, fallback) {
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return fallback;
+  }
+  return parsed;
+}
+
+async function logAdminAction(req, payload) {
+  await createSystemLog({
+    ...payload,
+    actorId: req.user?.id || null,
+    actorRole: req.user?.role || "admin",
+    metadata: {
+      path: req.originalUrl,
+      method: req.method,
+      ...(payload.metadata || {})
+    }
+  });
 }
 
 async function getOrCreateTaxonomyDoc() {
@@ -426,9 +459,24 @@ exports.createDestination = async (req, res) => {
       isActive: true
     });
 
+    await logAdminAction(req, {
+      severity: "Success",
+      event: "Destination created",
+      description: `Destination '${destination.name}' was created.`,
+      status: "Success",
+      metadata: { destinationId: destination._id.toString() }
+    });
+
     res.status(201).json(destination);
   } catch (err) {
     console.error("Create destination error:", err);
+    await logAdminAction(req, {
+      severity: "Error",
+      event: "Destination create failed",
+      description: err.message,
+      status: "Failed",
+      metadata: { body: req.body }
+    });
     res.status(500).json({ message: "Server error" });
   }
 };
@@ -551,9 +599,24 @@ exports.updateDestination = async (req, res) => {
       return res.status(404).json({ message: "Destination not found" });
     }
 
+    await logAdminAction(req, {
+      severity: "Info",
+      event: "Destination updated",
+      description: `Destination '${destination.name}' was updated.`,
+      status: "Success",
+      metadata: { destinationId: destination._id.toString() }
+    });
+
     res.json(destination);
   } catch (err) {
     console.error(err);
+    await logAdminAction(req, {
+      severity: "Error",
+      event: "Destination update failed",
+      description: err.message,
+      status: "Failed",
+      metadata: { destinationId: req.params.id }
+    });
     res.status(500).json({ message: "Server error" });
   }
 };
@@ -570,9 +633,24 @@ exports.deleteDestination = async (req, res) => {
     destination.isActive = false;
     await destination.save();
 
+    await logAdminAction(req, {
+      severity: "Warning",
+      event: "Destination deactivated",
+      description: `Destination '${destination.name}' was deactivated.`,
+      status: "Warning",
+      metadata: { destinationId: destination._id.toString() }
+    });
+
     res.json({ message: "Destination deactivated successfully" });
   } catch (err) {
     console.error(err);
+    await logAdminAction(req, {
+      severity: "Error",
+      event: "Destination deactivation failed",
+      description: err.message,
+      status: "Failed",
+      metadata: { destinationId: req.params.id }
+    });
     res.status(500).json({ message: "Server error" });
   }
 };
@@ -580,8 +658,20 @@ exports.deleteDestination = async (req, res) => {
 exports.getAllDestinationsAdmin = async (req, res) => {
   try {
     const destinations = await Destination.find();
+    await logAdminAction(req, {
+      severity: "Info",
+      event: "Destinations listed",
+      description: `Admin retrieved ${destinations.length} destinations.`,
+      status: "Success"
+    });
     res.json(destinations);
   } catch (err) {
+    await logAdminAction(req, {
+      severity: "Error",
+      event: "Destination list fetch failed",
+      description: err.message,
+      status: "Failed"
+    });
     res.status(500).json({ message: "Server error" });
   }
 };
@@ -590,22 +680,123 @@ exports.getAllUsers = async (req, res) => {
   try {
     const users = await User.find().select("-password");
 
+    await logAdminAction(req, {
+      severity: "Info",
+      event: "Users listed",
+      description: `Admin retrieved ${users.length} users.`,
+      status: "Success"
+    });
+
     res.json(users);
   } catch (err) {
     console.error(err);
+    await logAdminAction(req, {
+      severity: "Error",
+      event: "User list fetch failed",
+      description: err.message,
+      status: "Failed"
+    });
     res.status(500).json({ message: "Server error" });
   }
 };
 
-exports.getAllItineraries = async (_req, res) => {
+exports.getAllItineraries = async (req, res) => {
   try {
     const itineraries = await Itinerary.find()
       .populate("user", "name email")
       .populate("destinations.destination", "name");
 
+    await logAdminAction(req, {
+      severity: "Info",
+      event: "Itineraries listed",
+      description: `Admin retrieved ${itineraries.length} itineraries.`,
+      status: "Success"
+    });
+
     res.json(itineraries);
   } catch (err) {
     console.error(err);
+    await logAdminAction(req, {
+      severity: "Error",
+      event: "Itinerary list fetch failed",
+      description: err.message,
+      status: "Failed"
+    });
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+exports.getSystemLogs = async (req, res) => {
+  try {
+    const severity = typeof req.query.severity === "string"
+      ? req.query.severity.trim()
+      : "";
+    const status = typeof req.query.status === "string"
+      ? req.query.status.trim()
+      : "";
+    const search = typeof req.query.search === "string"
+      ? req.query.search.trim()
+      : "";
+    const from = parseDateInput(req.query.from);
+    const to = parseDateInput(req.query.to);
+    const page = parsePositiveInt(req.query.page, 1);
+    const limit = Math.min(parsePositiveInt(req.query.limit, 50), 100);
+
+    if (severity && !allowedSeverities.has(severity)) {
+      return res.status(400).json({ message: "Invalid severity filter" });
+    }
+
+    if (status && !allowedLogStatuses.has(status)) {
+      return res.status(400).json({ message: "Invalid status filter" });
+    }
+
+    if (req.query.from && !from) {
+      return res.status(400).json({ message: "Invalid from date" });
+    }
+
+    if (req.query.to && !to) {
+      return res.status(400).json({ message: "Invalid to date" });
+    }
+
+    const query = {};
+    if (severity) query.severity = severity;
+    if (status) query.status = status;
+    if (search) {
+      query.$or = [
+        { event: { $regex: search, $options: "i" } },
+        { description: { $regex: search, $options: "i" } }
+      ];
+    }
+    if (from || to) {
+      query.timestamp = {};
+      if (from) query.timestamp.$gte = from;
+      if (to) query.timestamp.$lte = to;
+    }
+
+    const skip = (page - 1) * limit;
+    const [logs, total] = await Promise.all([
+      SystemLog.find(query).sort({ timestamp: -1 }).skip(skip).limit(limit),
+      SystemLog.countDocuments(query)
+    ]);
+
+    res.json({
+      logs: logs.map((log) => ({
+        _id: log._id,
+        severity: log.severity,
+        event: log.event,
+        description: log.description,
+        status: log.status,
+        timestamp: log.timestamp.toISOString(),
+        actorId: log.actorId,
+        actorRole: log.actorRole
+      })),
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit) || 1
+    });
+  } catch (err) {
+    console.error("Get system logs error:", err);
     res.status(500).json({ message: "Server error" });
   }
 };
@@ -729,9 +920,22 @@ exports.getRoutePreview = async (req, res) => {
       profile
     });
 
+    await logAdminAction(req, {
+      severity: "Info",
+      event: "Route preview requested",
+      description: "Admin requested route preview.",
+      status: "Success"
+    });
+
     res.json(route);
   } catch (err) {
     console.error("Route preview error:", err);
+    await logAdminAction(req, {
+      severity: "Error",
+      event: "Route preview failed",
+      description: err.message,
+      status: "Failed"
+    });
     res.status(502).json({
       message: "Mapbox route fetch failed",
       details: err.message

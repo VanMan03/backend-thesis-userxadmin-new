@@ -1,5 +1,6 @@
 const jwt = require("jsonwebtoken");
 const User = require("../models/User");
+const { createSystemLog } = require("../services/systemLogService");
 
 const authMiddleware = async (req, res, next) => {
   try {
@@ -7,6 +8,16 @@ const authMiddleware = async (req, res, next) => {
     const authHeader = req.headers.authorization;
 
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      await createSystemLog({
+        severity: "Warning",
+        event: "Authentication failed",
+        description: "Request rejected: missing bearer token",
+        status: "Failed",
+        metadata: {
+          path: req.originalUrl,
+          method: req.method
+        }
+      });
       return res.status(401).json({ message: "No token provided" });
     }
 
@@ -19,6 +30,16 @@ const authMiddleware = async (req, res, next) => {
     const user = await User.findById(decoded.id).select("-password");
 
     if (!user) {
+      await createSystemLog({
+        severity: "Warning",
+        event: "Authentication failed",
+        description: "Request rejected: token user not found",
+        status: "Failed",
+        metadata: {
+          path: req.originalUrl,
+          method: req.method
+        }
+      });
       return res.status(401).json({ message: "User not found" });
     }
 
@@ -30,6 +51,16 @@ const authMiddleware = async (req, res, next) => {
     // 4. Continue to next middleware / controller
     next();
   } catch (err) {
+    await createSystemLog({
+      severity: "Warning",
+      event: "Authentication failed",
+      description: "Request rejected: invalid or expired token",
+      status: "Failed",
+      metadata: {
+        path: req.originalUrl,
+        method: req.method
+      }
+    });
     return res.status(401).json({ message: "Invalid or expired token" });
   }
 };
