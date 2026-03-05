@@ -3,6 +3,7 @@ const mongoose = require("mongoose");
 const FEEDBACK_EVENT_TYPES = [
   "recommendation_requested",
   "recommendation_impression",
+  "destination_rated",
   "destination_added",
   "destination_removed",
   "itinerary_saved",

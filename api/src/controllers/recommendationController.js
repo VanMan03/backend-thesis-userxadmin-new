@@ -13,6 +13,8 @@ const {
 
 const RecommendationFeedback = require("../models/RecommendationFeedback");
 const Destination = require("../models/Destination");
+const Rating = require("../models/Rating");
+const mongoose = require("mongoose");
 const { createSystemLog } = require("../services/systemLogService");
 const {
   normalizeDays,
@@ -25,6 +27,7 @@ const {
 const FEEDBACK_EVENT_TYPES = new Set([
   "recommendation_requested",
   "recommendation_impression",
+  "destination_rated",
   "destination_added",
   "destination_removed",
   "itinerary_saved",
@@ -95,6 +98,45 @@ function normalizeFeedbackEvent(event, fallbackUserId = null) {
     itineraryId: event.itineraryId || null,
     metadata: event.metadata && typeof event.metadata === "object" ? event.metadata : {}
   };
+}
+
+async function upsertRatingFromFeedbackEvent(event, fallbackUserId = null) {
+  if (event.eventType !== "destination_rated") return;
+
+  const destinationId = event.destinationId || event.metadata?.destinationId || null;
+  const rating = event.metadata?.rating;
+  const userId = event.userId || fallbackUserId || null;
+
+  if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+    const err = new Error("destination_rated event requires a valid userId");
+    err.status = 400;
+    throw err;
+  }
+
+  if (!mongoose.Types.ObjectId.isValid(destinationId)) {
+    const err = new Error("destination_rated event requires a valid destinationId");
+    err.status = 400;
+    throw err;
+  }
+
+  if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+    const err = new Error("destination_rated event requires metadata.rating between 1 and 5");
+    err.status = 400;
+    throw err;
+  }
+
+  const destinationExists = await Destination.exists({ _id: destinationId, isActive: true });
+  if (!destinationExists) {
+    const err = new Error("destination_rated event destination not found");
+    err.status = 400;
+    throw err;
+  }
+
+  await Rating.findOneAndUpdate(
+    { user: userId, destination: destinationId },
+    { $set: { rating } },
+    { upsert: true, new: true, setDefaultsOnInsert: true }
+  );
 }
 
 /**
@@ -291,6 +333,7 @@ exports.createFeedbackEvent = async (req, res) => {
     }
 
     await RecommendationFeedback.create(normalized);
+    await upsertRatingFromFeedbackEvent(normalized, fallbackUserId);
 
     const mapped = ITINERARY_EVENT_TO_LOG[normalized.eventType];
     if (mapped) {
@@ -310,6 +353,9 @@ exports.createFeedbackEvent = async (req, res) => {
 
     return res.status(201).json({ ok: true });
   } catch (err) {
+    if (err.status === 400) {
+      return res.status(400).json({ message: err.message });
+    }
     console.error(err);
     await logRecommendationEvent(req, {
       severity: "Error",
@@ -343,6 +389,11 @@ exports.createFeedbackBatch = async (req, res) => {
 
     await RecommendationFeedback.insertMany(normalizedEvents, { ordered: false });
 
+    for (const event of normalizedEvents) {
+      // Keep batch behavior deterministic: fail the request if a destination_rated event is invalid.
+      await upsertRatingFromFeedbackEvent(event, fallbackUserId);
+    }
+
     const itineraryEvents = normalizedEvents.filter(
       (event) => ITINERARY_EVENT_TO_LOG[event.eventType]
     );
@@ -364,6 +415,9 @@ exports.createFeedbackBatch = async (req, res) => {
       accepted: normalizedEvents.length
     });
   } catch (err) {
+    if (err.status === 400) {
+      return res.status(400).json({ message: err.message });
+    }
     console.error(err);
     await logRecommendationEvent(req, {
       severity: "Error",
