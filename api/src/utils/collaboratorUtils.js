@@ -103,7 +103,8 @@ async function normalizeCollaborators({
   currentUserId,
   travelStyle,
   collaboratorIds,
-  collaborators
+  collaborators,
+  enforceTravelStyleCount = false
 }) {
   const normalizedStyle = normalizeTravelStyle(travelStyle);
   if (!normalizedStyle) {
@@ -132,16 +133,18 @@ async function normalizeCollaborators({
   deduped.delete(normalizedCurrentUserId);
 
   const finalIds = [...deduped];
-  const rules = TRAVEL_STYLE_RULES[normalizedStyle] || TRAVEL_STYLE_RULES[DEFAULT_TRAVEL_STYLE];
-  const exceedsMax = Number.isFinite(rules.max) ? finalIds.length > rules.max : false;
+  if (enforceTravelStyleCount) {
+    const rules = TRAVEL_STYLE_RULES[normalizedStyle] || TRAVEL_STYLE_RULES[DEFAULT_TRAVEL_STYLE];
+    const exceedsMax = Number.isFinite(rules.max) ? finalIds.length > rules.max : false;
 
-  if (finalIds.length < rules.min || exceedsMax) {
-    const maxLabel = Number.isFinite(rules.max) ? rules.max : "unlimited";
-    return {
-      ok: false,
-      code: "INVALID_COLLABORATOR_COUNT",
-      message: `travelStyle '${normalizedStyle}' requires ${rules.min}-${maxLabel} collaborators`
-    };
+    if (finalIds.length < rules.min || exceedsMax) {
+      const maxLabel = Number.isFinite(rules.max) ? rules.max : "unlimited";
+      return {
+        ok: false,
+        code: "INVALID_COLLABORATOR_COUNT",
+        message: `travelStyle '${normalizedStyle}' requires ${rules.min}-${maxLabel} collaborators`
+      };
+    }
   }
 
   if (finalIds.length) {
