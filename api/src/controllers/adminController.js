@@ -607,6 +607,50 @@ exports.getAllItineraries = async (_req, res) => {
   }
 };
 
+exports.getCloudinaryUploadSignature = async (req, res) => {
+  try {
+    const timestamp = Math.round(Date.now() / 1000);
+    const requestedFolder =
+      typeof req.body?.folder === "string" ? req.body.folder.trim() : "";
+    const folder = requestedFolder || "destinations";
+    const rawParams =
+      req.body?.paramsToSign && typeof req.body.paramsToSign === "object"
+        ? req.body.paramsToSign
+        : null;
+
+    const paramsToSign = rawParams
+      ? Object.fromEntries(
+        Object.entries(rawParams).filter(([, value]) =>
+          ["string", "number", "boolean"].includes(typeof value)
+        )
+      )
+      : {};
+
+    if (!Object.prototype.hasOwnProperty.call(paramsToSign, "timestamp")) {
+      paramsToSign.timestamp = timestamp;
+    }
+    if (!Object.prototype.hasOwnProperty.call(paramsToSign, "folder")) {
+      paramsToSign.folder = folder;
+    }
+
+    const signature = cloudinary.utils.api_sign_request(
+      paramsToSign,
+      process.env.CLOUD_API_SECRET
+    );
+
+    res.json({
+      cloudName: process.env.CLOUD_NAME,
+      apiKey: process.env.CLOUD_API_KEY,
+      timestamp,
+      folder,
+      signature
+    });
+  } catch (err) {
+    console.error("Cloudinary signature error:", err);
+    res.status(500).json({ message: "Failed to generate upload signature" });
+  }
+};
+
 exports.uploadDestinationImage = async (req, res) => {
   try {
     const { id } = req.params;
