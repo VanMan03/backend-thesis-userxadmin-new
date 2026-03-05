@@ -83,17 +83,15 @@ exports.login = async (req, res) => {
       { expiresIn: "1d" }
     );
 
-    if (user.role === "admin") {
-      await createSystemLog({
-        severity: "Success",
-        event: "Admin login successful",
-        description: `Admin ${user.email} signed in.`,
-        status: "Success",
-        actorId: user._id,
-        actorRole: user.role,
-        metadata: { email: user.email }
-      });
-    }
+    await createSystemLog({
+      severity: "Success",
+      event: user.role === "admin" ? "Admin login successful" : "User login successful",
+      description: `${user.role === "admin" ? "Admin" : "User"} ${user.email} signed in.`,
+      status: "Success",
+      actorId: user._id,
+      actorRole: user.role,
+      metadata: { email: user.email }
+    });
 
     res.json({ token });
   } catch (err) {

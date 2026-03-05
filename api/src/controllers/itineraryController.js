@@ -92,8 +92,10 @@ exports.createItinerary = async (req, res) => {
 
     await logItineraryEvent(req, {
       severity: "Success",
-      event: "Itinerary created",
-      description: "User created itinerary.",
+      event: Boolean(isSaved) ? "Itinerary saved" : "Itinerary created",
+      description: Boolean(isSaved)
+        ? "User created and saved itinerary."
+        : "User created itinerary.",
       status: "Success",
       metadata: { itineraryId: itinerary._id.toString() }
     });

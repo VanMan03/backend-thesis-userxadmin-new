@@ -13,6 +13,7 @@ const {
 
 const RecommendationFeedback = require("../models/RecommendationFeedback");
 const Destination = require("../models/Destination");
+const { createSystemLog } = require("../services/systemLogService");
 const {
   normalizeDays,
   splitDestinationsByDays
@@ -31,6 +32,42 @@ const FEEDBACK_EVENT_TYPES = new Set([
   "saved_itinerary_updated",
   "saved_itinerary_deleted"
 ]);
+
+const ITINERARY_EVENT_TO_LOG = {
+  itinerary_saved: {
+    severity: "Success",
+    event: "Itinerary saved",
+    status: "Success"
+  },
+  saved_itinerary_viewed: {
+    severity: "Info",
+    event: "Saved itinerary viewed",
+    status: "Success"
+  },
+  saved_itinerary_updated: {
+    severity: "Info",
+    event: "Saved itinerary updated",
+    status: "Success"
+  },
+  saved_itinerary_deleted: {
+    severity: "Warning",
+    event: "Saved itinerary deleted",
+    status: "Warning"
+  }
+};
+
+async function logRecommendationEvent(req, payload) {
+  await createSystemLog({
+    ...payload,
+    actorId: req.user?.id || null,
+    actorRole: req.user?.role || "user",
+    metadata: {
+      path: req.originalUrl,
+      method: req.method,
+      ...(payload.metadata || {})
+    }
+  });
+}
 
 function normalizeFeedbackEvent(event, fallbackUserId = null) {
   if (!event || typeof event !== "object") return null;
@@ -105,16 +142,35 @@ exports.generateItinerary = async (req, res) => {
     });
 
     if (!["constrained", "unconstrained"].includes(budgetMode)) {
+      await logRecommendationEvent(req, {
+        severity: "Warning",
+        event: "Generate itinerary validation failed",
+        description: "budgetMode must be constrained or unconstrained",
+        status: "Failed"
+      });
       return res.status(400).json({
         message: "budgetMode must be constrained or unconstrained"
       });
     }
 
     if (days !== undefined && normalizedDays === null) {
+      await logRecommendationEvent(req, {
+        severity: "Warning",
+        event: "Generate itinerary validation failed",
+        description: "days must be a positive integer",
+        status: "Failed"
+      });
       return res.status(400).json({ message: "days must be a positive integer" });
     }
 
     if (!collaboratorResult.ok) {
+      await logRecommendationEvent(req, {
+        severity: "Warning",
+        event: "Generate itinerary validation failed",
+        description: collaboratorResult.message,
+        status: "Failed",
+        metadata: { code: collaboratorResult.code }
+      });
       return res.status(400).json({ message: collaboratorResult.message, code: collaboratorResult.code });
     }
 
@@ -152,6 +208,12 @@ exports.generateItinerary = async (req, res) => {
 
     if (budgetMode === "constrained") {
       if (!Number.isFinite(parsedBudget)) {
+        await logRecommendationEvent(req, {
+          severity: "Warning",
+          event: "Generate itinerary validation failed",
+          description: "Budget is required for constrained mode",
+          status: "Failed"
+        });
         return res.status(400).json({
           message: "Budget is required for constrained mode"
         });
@@ -183,6 +245,14 @@ exports.generateItinerary = async (req, res) => {
     itinerary.days = normalizedDays;
     itinerary.dayPlans = dayPlans;
 
+    await logRecommendationEvent(req, {
+      severity: "Info",
+      event: "Itinerary recommendations generated",
+      description: "User generated itinerary recommendations.",
+      status: "Success",
+      metadata: { budgetMode, days: normalizedDays }
+    });
+
     res.json({
       mode: budgetMode,
       totalCost,
@@ -197,6 +267,12 @@ exports.generateItinerary = async (req, res) => {
     });
   } catch (err) {
     console.error(err);
+    await logRecommendationEvent(req, {
+      severity: "Error",
+      event: "Generate itinerary failed",
+      description: err.message,
+      status: "Failed"
+    });
     res.status(500).json({ message: "Server error" });
   }
 };
@@ -215,9 +291,32 @@ exports.createFeedbackEvent = async (req, res) => {
     }
 
     await RecommendationFeedback.create(normalized);
+
+    const mapped = ITINERARY_EVENT_TO_LOG[normalized.eventType];
+    if (mapped) {
+      await logRecommendationEvent(req, {
+        severity: mapped.severity,
+        event: mapped.event,
+        description: `Feedback event '${normalized.eventType}' received.`,
+        status: mapped.status,
+        metadata: {
+          eventType: normalized.eventType,
+          itineraryId: normalized.itineraryId || null,
+          destinationId: normalized.destinationId || null,
+          sessionId: normalized.sessionId
+        }
+      });
+    }
+
     return res.status(201).json({ ok: true });
   } catch (err) {
     console.error(err);
+    await logRecommendationEvent(req, {
+      severity: "Error",
+      event: "Feedback ingest failed",
+      description: err.message,
+      status: "Failed"
+    });
     return res.status(500).json({ message: "Server error" });
   }
 };
@@ -244,12 +343,34 @@ exports.createFeedbackBatch = async (req, res) => {
 
     await RecommendationFeedback.insertMany(normalizedEvents, { ordered: false });
 
+    const itineraryEvents = normalizedEvents.filter(
+      (event) => ITINERARY_EVENT_TO_LOG[event.eventType]
+    );
+    if (itineraryEvents.length) {
+      await logRecommendationEvent(req, {
+        severity: "Info",
+        event: "Itinerary feedback batch received",
+        description: `Received ${itineraryEvents.length} itinerary-related feedback events.`,
+        status: "Success",
+        metadata: {
+          totalAccepted: normalizedEvents.length,
+          itineraryEventTypes: Array.from(new Set(itineraryEvents.map((e) => e.eventType)))
+        }
+      });
+    }
+
     return res.status(201).json({
       ok: true,
       accepted: normalizedEvents.length
     });
   } catch (err) {
     console.error(err);
+    await logRecommendationEvent(req, {
+      severity: "Error",
+      event: "Feedback batch ingest failed",
+      description: err.message,
+      status: "Failed"
+    });
     return res.status(500).json({ message: "Server error" });
   }
 };
