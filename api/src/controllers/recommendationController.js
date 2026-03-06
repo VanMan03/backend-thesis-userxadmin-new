@@ -175,9 +175,62 @@ function destinationMatchesFeatureFilter(destination, filter) {
   return hasMainMatch;
 }
 
-function filterRecommendationCandidates(candidates = [], filter) {
-  if (!filter?.enabled) return candidates;
-  return candidates.filter((item) => destinationMatchesFeatureFilter(item.destination, filter));
+function partitionRecommendationCandidates(candidates = [], filter) {
+  if (!filter?.enabled) {
+    return {
+      exactMatches: candidates,
+      similarMatches: []
+    };
+  }
+
+  if (!filter.subInterests.length) {
+    return {
+      exactMatches: candidates.filter((item) =>
+        hasIntersection(
+          normalizeDestinationInterests(item.destination).mainInterests,
+          filter.mainInterests
+        )
+      ),
+      similarMatches: []
+    };
+  }
+
+  const exactMatches = [];
+  const similarMatches = [];
+
+  candidates.forEach((item) => {
+    const destinationInterests = normalizeDestinationInterests(item.destination);
+    const hasSubMatch = hasIntersection(destinationInterests.subInterests, filter.subInterests);
+    if (hasSubMatch) {
+      exactMatches.push(item);
+      return;
+    }
+
+    if (hasIntersection(destinationInterests.mainInterests, filter.mainInterests)) {
+      similarMatches.push(item);
+    }
+  });
+
+  return { exactMatches, similarMatches };
+}
+
+function buildTwoStageCandidates(candidates = [], filter, minimumExactMatches = 1) {
+  const { exactMatches, similarMatches } = partitionRecommendationCandidates(candidates, filter);
+  const exactCount = exactMatches.length;
+  const similarCount = similarMatches.length;
+  const fallbackAllowed = filter?.enabled && filter?.mode === "similar_fill" && filter?.subInterests.length > 0;
+  const checksExactThreshold = filter?.enabled && filter?.subInterests.length > 0;
+  const insufficientExactMatches = checksExactThreshold && exactCount < minimumExactMatches;
+  const fallbackApplied = fallbackAllowed && insufficientExactMatches && similarCount > 0;
+  const reason = insufficientExactMatches ? "insufficient_exact_matches" : null;
+
+  return {
+    candidates: fallbackApplied ? [...exactMatches, ...similarMatches] : exactMatches,
+    exactCount,
+    similarCount,
+    fallbackApplied,
+    reason
+  };
 }
 
 async function logRecommendationEvent(req, payload) {
@@ -349,7 +402,9 @@ exports.generateItinerary = async (req, res) => {
         travelStyle: collaboratorResult.travelStyle
       })
       : await getHybridRecommendations(userId);
-    let candidateResults = filterRecommendationCandidates(hybridResults, featureFilter);
+    const minimumExactMatches = normalizedDays || 1;
+    let matchMetadata = buildTwoStageCandidates(hybridResults, featureFilter, minimumExactMatches);
+    let candidateResults = matchMetadata.candidates;
 
     // Fallback for new users/no interaction history.
     if (!candidateResults.length) {
@@ -357,16 +412,21 @@ exports.generateItinerary = async (req, res) => {
         .sort({ createdAt: -1 })
         .limit(50);
 
-      candidateResults = filterRecommendationCandidates(fallbackDestinations.map((destination) => ({
+      matchMetadata = buildTwoStageCandidates(fallbackDestinations.map((destination) => ({
         destination,
         score: 0
-      })), featureFilter);
+      })), featureFilter, minimumExactMatches);
+      candidateResults = matchMetadata.candidates;
     }
 
     if (!candidateResults.length) {
       return res.status(200).json({
         mode: budgetMode,
         totalCost: 0,
+        exactCount: matchMetadata.exactCount,
+        similarCount: matchMetadata.similarCount,
+        fallbackApplied: matchMetadata.fallbackApplied,
+        reason: matchMetadata.reason,
         recommendations: [],
         itinerary: null,
         message: featureFilter.enabled
@@ -430,6 +490,10 @@ exports.generateItinerary = async (req, res) => {
       days: normalizedDays,
       travelStyle: collaboratorResult.travelStyle,
       collaboratorIds: collaboratorResult.collaboratorIds,
+      exactCount: matchMetadata.exactCount,
+      similarCount: matchMetadata.similarCount,
+      fallbackApplied: matchMetadata.fallbackApplied,
+      reason: matchMetadata.reason,
       recommendations: finalResults.map((item) => ({
         destination: item.destination,
         score: item.score
