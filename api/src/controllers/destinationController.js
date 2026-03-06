@@ -1,8 +1,11 @@
 //Manages destination data retrieval for users
 const Destination = require("../models/Destination");
+const DestinationTaxonomy = require("../models/DestinationTaxonomy");
 const Rating = require("../models/Rating");
 const DestinationComment = require("../models/DestinationComment");
 const mongoose = require("mongoose");
+const { getDefaultValidFeatures, sanitizeValidFeatures } = require("../utils/normalizeFeatures");
+const { buildInterestsSchema } = require("../utils/interestsSchema");
 const {
   upsertUserRatingAndAggregate,
   clearUserRatingAndAggregate,
@@ -11,6 +14,7 @@ const {
 const interestsSchema = require("../../shared/interests.schema.json");
 
 const COMMENT_MAX_LENGTH = 1000;
+const TAXONOMY_KEY = "default";
 const BLOCKED_TERMS = [
   "fuck",
   "shit",
@@ -39,6 +43,45 @@ function containsBlockedTerm(text) {
   const lower = text.toLowerCase();
   return BLOCKED_TERMS.some((term) => lower.includes(term));
 }
+
+async function toLeanResult(queryOrValue) {
+  if (queryOrValue && typeof queryOrValue.lean === "function") {
+    return queryOrValue.lean();
+  }
+  return queryOrValue;
+}
+
+exports.getInterestsSchema = async (_req, res) => {
+  try {
+    const canonicalValidFeatures = getDefaultValidFeatures();
+
+    if (!Object.keys(canonicalValidFeatures).length) {
+      console.warn("[destinations/interests-schema] Canonical valid features are empty");
+    }
+
+    const [taxonomyDoc, destinations] = await Promise.all([
+      toLeanResult(DestinationTaxonomy.findOne({ key: TAXONOMY_KEY })),
+      toLeanResult(Destination.find({ isActive: true }))
+    ]);
+
+    const runtimeValidFeatures = sanitizeValidFeatures(taxonomyDoc?.validFeatures || {});
+    const destinationFeatureObjects = (Array.isArray(destinations) ? destinations : [])
+      .map((item) => item?.features)
+      .filter((item) => item && typeof item === "object");
+
+    const schema = buildInterestsSchema({
+      canonicalValidFeatures,
+      runtimeValidFeatures,
+      destinationFeatureObjects
+    });
+
+    res.set("Cache-Control", "no-store");
+    res.status(200).json(schema);
+  } catch (err) {
+    console.error("Get interests schema error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
 
 //Get all active destinations (for users)
 
