@@ -1,4 +1,5 @@
 const User = require("../models/User");
+const { normalizeMainInterestIds } = require("../shared/interests");
 
 function normalizeDays(daysInput) {
   if (daysInput === undefined || daysInput === null || daysInput === "") {
@@ -29,6 +30,25 @@ function calculateRankWeight(rank) {
  * Map user boolean preferences to interest categories
  */
 function mapPreferencesToInterests(preferences) {
+  const canonicalMainInterests = normalizeMainInterestIds(preferences?.mainInterests);
+  if (canonicalMainInterests.length) {
+    const mappedLabels = {
+      nature: "Nature Tourism",
+      diving: "Diving and Marine Sports Tourism",
+      sun_beach: "Sun and Beach Tourism",
+      health_wellness: "Health, Wellness, and Retirement Tourism",
+      events: "MICE and Events Tourism",
+      culture_heritage: "Cultural Tourism",
+      education: "Education Tourism",
+      cruise: "Cruise and Nautical Tourism",
+      leisure: "Leisure and Entertainment Tourism"
+    };
+
+    return canonicalMainInterests
+      .map((id) => mappedLabels[id])
+      .filter(Boolean);
+  }
+
   const interestMap = {
     natureTourism: 'Nature Tourism',
     culturalTourism: 'Cultural Tourism', 

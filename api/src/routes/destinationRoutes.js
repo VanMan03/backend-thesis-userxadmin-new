@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const {
   getAllDestinations,
+  getInterestsSchema,
   getDestinationById,
   upsertDestinationRating,
   getMyDestinationRatings,
@@ -24,6 +25,7 @@ const commentWriteRateLimit = simpleRateLimit({
 
 // Public (or optionally authenticated)
 router.get("/", getAllDestinations);
+router.get("/interests-schema", getInterestsSchema);
 router.get("/ratings/me", auth, getMyDestinationRatings);
 router.post("/:destinationId/rating", auth, ratingWriteRateLimit, upsertDestinationRating);
 router.delete("/:destinationId/rating", auth, ratingWriteRateLimit, clearDestinationRating);

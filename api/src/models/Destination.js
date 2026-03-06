@@ -1,4 +1,8 @@
 const mongoose = require("mongoose");
+const {
+  MAIN_INTEREST_IDS,
+  SUB_INTEREST_IDS
+} = require("../shared/interests");
 const DestinationSchema = new mongoose.Schema(
   {
     name: String,
@@ -17,6 +21,16 @@ const DestinationSchema = new mongoose.Schema(
       type: Object,
       required: true
       // e.g. { "Nature Tourism": { ecoTours: 1, wildernessTrekking: 1 } }
+    },
+    mainInterests: {
+      type: [String],
+      enum: MAIN_INTEREST_IDS,
+      default: []
+    },
+    subInterests: {
+      type: [String],
+      enum: SUB_INTEREST_IDS,
+      default: []
     },
 
   estimatedCost: {

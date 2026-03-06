@@ -1,6 +1,10 @@
 //This controller manages user profile and preferences
 const User = require("../models/User");
 const { createSystemLog } = require("../services/systemLogService");
+const {
+  normalizeMainInterestIds,
+  normalizeSubInterestIds
+} = require("../shared/interests");
 
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -31,19 +35,44 @@ exports.getProfile = async (req, res) => {
 exports.updatePreferences = async (req, res) => {
   try {
     const { preferences } = req.body;
+    const nextPreferences = preferences && typeof preferences === "object"
+      ? { ...preferences }
+      : {};
+
+    if (Object.prototype.hasOwnProperty.call(nextPreferences, "mainInterests")) {
+      const normalizedMainInterests = normalizeMainInterestIds(nextPreferences.mainInterests);
+      if (
+        Array.isArray(nextPreferences.mainInterests) &&
+        normalizedMainInterests.length !== nextPreferences.mainInterests.length
+      ) {
+        return res.status(400).json({ message: "Invalid mainInterests IDs" });
+      }
+      nextPreferences.mainInterests = normalizedMainInterests;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(nextPreferences, "subInterests")) {
+      const normalizedSubInterests = normalizeSubInterestIds(nextPreferences.subInterests);
+      if (
+        Array.isArray(nextPreferences.subInterests) &&
+        normalizedSubInterests.length !== nextPreferences.subInterests.length
+      ) {
+        return res.status(400).json({ message: "Invalid subInterests IDs" });
+      }
+      nextPreferences.subInterests = normalizedSubInterests;
+    }
 
     // Validate interestRanks if provided
-    if (preferences && preferences.interestRanks) {
-      const { interestRanks } = preferences;
+    if (nextPreferences && nextPreferences.interestRanks) {
+      const { interestRanks } = nextPreferences;
       
       // Convert object to Map for Mongoose if needed
       if (typeof interestRanks === 'object' && !(interestRanks instanceof Map)) {
-        preferences.interestRanks = new Map(Object.entries(interestRanks));
+        nextPreferences.interestRanks = new Map(Object.entries(interestRanks));
       }
       
       // Validate rank values
-      if (preferences.interestRanks instanceof Map) {
-        for (const [key, value] of preferences.interestRanks.entries()) {
+      if (nextPreferences.interestRanks instanceof Map) {
+        for (const [key, value] of nextPreferences.interestRanks.entries()) {
           if (typeof value !== 'number' || value < 1 || value > 9) {
             await logUserEvent(req, {
               severity: "Warning",
@@ -59,7 +88,7 @@ exports.updatePreferences = async (req, res) => {
       }
     }
 
-    await User.findByIdAndUpdate(req.user.id, { preferences });
+    await User.findByIdAndUpdate(req.user.id, { preferences: nextPreferences });
     await logUserEvent(req, {
       severity: "Info",
       event: "Preferences updated",

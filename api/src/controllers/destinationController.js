@@ -8,6 +8,7 @@ const {
   clearUserRatingAndAggregate,
   withDestinationAggregate
 } = require("../services/destinationRatingAggregate");
+const interestsSchema = require("../../shared/interests.schema.json");
 
 const COMMENT_MAX_LENGTH = 1000;
 const BLOCKED_TERMS = [
@@ -40,6 +41,10 @@ function containsBlockedTerm(text) {
 }
 
 //Get all active destinations (for users)
+
+exports.getInterestsSchema = async (_req, res) => {
+  res.json(interestsSchema);
+};
 
 exports.getAllDestinations = async (_req, res) => {
   try {

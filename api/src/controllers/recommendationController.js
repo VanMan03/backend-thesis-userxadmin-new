@@ -13,7 +13,6 @@ const {
 
 const RecommendationFeedback = require("../models/RecommendationFeedback");
 const Destination = require("../models/Destination");
-const DestinationTaxonomy = require("../models/DestinationTaxonomy");
 const mongoose = require("mongoose");
 const { createSystemLog } = require("../services/systemLogService");
 const {
@@ -21,14 +20,13 @@ const {
   splitDestinationsByDays
 } = require("../utils/splitItineraryByDays");
 const {
-  normalizeFeatures,
-  normalizeCategories,
-  sanitizeValidFeatures,
-  getDefaultValidFeatures
-} = require("../utils/normalizeFeatures");
-const {
   normalizeCollaborators
 } = require("../utils/collaboratorUtils");
+const {
+  normalizeMainInterestIds,
+  normalizeSubInterestIds,
+  legacyToCanonicalSelection
+} = require("../shared/interests");
 const {
   upsertUserRatingAndAggregate,
   clearUserRatingAndAggregate
@@ -69,115 +67,112 @@ const ITINERARY_EVENT_TO_LOG = {
   }
 };
 
-const TAXONOMY_KEY = "default";
-
-function normalizeCategoryKey(value = "") {
-  return value.toString().trim().toLowerCase();
+function hasIntersection(source = [], target = []) {
+  if (!source.length || !target.length) return false;
+  const targetSet = new Set(target);
+  return source.some((value) => targetSet.has(value));
 }
 
-function normalizeFeatureKey(value = "") {
-  return value
-    .toString()
-    .replace(/&/g, "")
-    .replace(/\s+/g, "")
-    .replace(/-/g, "")
-    .toLowerCase();
-}
+function extractInterestFilterFromRequest(body = {}) {
+  const requestMainInterests = normalizeMainInterestIds(body.mainInterests);
+  const requestSubInterests = normalizeSubInterestIds(body.subInterests);
+  const matchMode = body.matchMode === "similar_fill" ? "similar_fill" : "strict";
 
-function extractRequestSelectionFilter(body = {}) {
-  const hasSelectedFeatures = Object.prototype.hasOwnProperty.call(body, "selectedFeatures");
-  const hasFeatures = Object.prototype.hasOwnProperty.call(body, "features");
-  const selectedFeatures = hasSelectedFeatures
+  if (
+    Array.isArray(body.mainInterests) &&
+    requestMainInterests.length !== body.mainInterests.length
+  ) {
+    return {
+      enabled: false,
+      invalid: true,
+      message: "mainInterests contains invalid IDs",
+      mode: matchMode,
+      mainInterests: [],
+      subInterests: []
+    };
+  }
+
+  if (
+    Array.isArray(body.subInterests) &&
+    requestSubInterests.length !== body.subInterests.length
+  ) {
+    return {
+      enabled: false,
+      invalid: true,
+      message: "subInterests contains invalid IDs",
+      mode: matchMode,
+      mainInterests: [],
+      subInterests: []
+    };
+  }
+
+  if (requestMainInterests.length || requestSubInterests.length) {
+    return {
+      enabled: true,
+      invalid: false,
+      mode: matchMode,
+      mainInterests: requestMainInterests,
+      subInterests: requestSubInterests
+    };
+  }
+
+  const categories = body.categories ?? body.category ?? [];
+  const selectedFeatures = Object.prototype.hasOwnProperty.call(body, "selectedFeatures")
     ? body.selectedFeatures
-    : hasFeatures
-      ? body.features
-      : null;
+    : body.features;
+  const converted = legacyToCanonicalSelection({ categories, features: selectedFeatures });
 
-  const explicitCategories = body.categories ?? body.category ?? [];
-  const inferredCategories =
-    selectedFeatures && typeof selectedFeatures === "object" && !Array.isArray(selectedFeatures)
-      ? Object.keys(selectedFeatures)
-      : [];
-
-  const categories = normalizeCategories([...normalizeCategories(explicitCategories), ...inferredCategories]);
-
-  return {
-    categories,
-    selectedFeatures,
-    requested: categories.length > 0 || selectedFeatures !== null
-  };
-}
-
-async function getValidFeaturesMap() {
-  const taxonomy = await DestinationTaxonomy.findOne({ key: TAXONOMY_KEY });
-  const sanitized = sanitizeValidFeatures(taxonomy?.validFeatures || {});
-  return Object.keys(sanitized).length ? sanitized : getDefaultValidFeatures();
-}
-
-async function buildFeatureFilter(body = {}) {
-  const requestFilter = extractRequestSelectionFilter(body);
-  if (!requestFilter.requested) {
-    return { enabled: false, categories: [], features: {} };
+  if (!converted.mainInterests.length && !converted.subInterests.length) {
+    return {
+      enabled: false,
+      invalid: false,
+      mode: matchMode,
+      mainInterests: [],
+      subInterests: []
+    };
   }
-
-  if (!requestFilter.categories.length) {
-    return { enabled: false, categories: [], features: {} };
-  }
-
-  const validFeaturesMap = await getValidFeaturesMap();
-  const normalizedFeatures = normalizeFeatures(
-    requestFilter.categories,
-    requestFilter.selectedFeatures || {},
-    validFeaturesMap
-  );
 
   return {
     enabled: true,
-    categories: requestFilter.categories,
-    features: normalizedFeatures
+    invalid: false,
+    mode: matchMode,
+    mainInterests: converted.mainInterests,
+    subInterests: converted.subInterests
   };
+}
+
+function normalizeDestinationInterests(destination) {
+  const destinationMainInterests = normalizeMainInterestIds(destination?.mainInterests);
+  const destinationSubInterests = normalizeSubInterestIds(destination?.subInterests);
+
+  if (destinationMainInterests.length || destinationSubInterests.length) {
+    return {
+      mainInterests: destinationMainInterests,
+      subInterests: destinationSubInterests
+    };
+  }
+
+  return legacyToCanonicalSelection({
+    categories: destination?.category,
+    features: destination?.features
+  });
 }
 
 function destinationMatchesFeatureFilter(destination, filter) {
   if (!filter?.enabled) return true;
+  const destinationInterests = normalizeDestinationInterests(destination);
+  const hasSubMatch = hasIntersection(destinationInterests.subInterests, filter.subInterests);
+  const hasMainMatch = hasIntersection(destinationInterests.mainInterests, filter.mainInterests);
 
-  const destinationFeatures = destination?.features && typeof destination.features === "object"
-    ? destination.features
-    : {};
-  const requestedCategories = filter.categories || [];
+  if (filter.mode === "similar_fill") {
+    return hasSubMatch || hasMainMatch;
+  }
 
-  if (!requestedCategories.length) return true;
+  if (filter.subInterests.length) {
+    return hasSubMatch;
+  }
 
-  const destinationCategoryMap = new Map();
-  Object.keys(destinationFeatures).forEach((category) => {
-    destinationCategoryMap.set(normalizeCategoryKey(category), category);
-  });
-
-  // Any category/feature match is enough to include a destination.
-  return requestedCategories.some((requestedCategory) => {
-    const actualCategory = destinationCategoryMap.get(normalizeCategoryKey(requestedCategory));
-    if (!actualCategory) return false;
-
-    const selectedCategoryFeatures = filter.features?.[requestedCategory];
-    if (!selectedCategoryFeatures || !Object.keys(selectedCategoryFeatures).length) {
-      return true;
-    }
-
-    const destinationCategoryFeatures = destinationFeatures[actualCategory];
-    if (!destinationCategoryFeatures || typeof destinationCategoryFeatures !== "object") {
-      return false;
-    }
-
-    const destinationFeatureSet = new Set(
-      Object.entries(destinationCategoryFeatures)
-        .filter(([, value]) => value)
-        .map(([featureKey]) => normalizeFeatureKey(featureKey))
-    );
-
-    return Object.keys(selectedCategoryFeatures).some((featureKey) =>
-      destinationFeatureSet.has(normalizeFeatureKey(featureKey))
-    );
-  });
+  return hasMainMatch;
 }
 
 function filterRecommendationCandidates(candidates = [], filter) {
@@ -304,7 +299,10 @@ exports.generateItinerary = async (req, res) => {
     } = req.body;
     const parsedBudget = Number(maxBudget);
     const normalizedDays = normalizeDays(days);
-    const featureFilter = await buildFeatureFilter(req.body);
+    const featureFilter = extractInterestFilterFromRequest(req.body);
+    if (featureFilter.invalid) {
+      return res.status(400).json({ message: featureFilter.message });
+    }
     const collaboratorResult = await normalizeCollaborators({
       currentUserId: userId,
       travelStyle,
@@ -372,7 +370,7 @@ exports.generateItinerary = async (req, res) => {
         recommendations: [],
         itinerary: null,
         message: featureFilter.enabled
-          ? "No active destinations match the selected categories/features"
+          ? "No active destinations match the selected interests"
           : "No active destinations available"
       });
     }

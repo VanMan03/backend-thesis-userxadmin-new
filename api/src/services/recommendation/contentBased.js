@@ -1,6 +1,11 @@
 const Destination = require("../../models/Destination");
 const User = require("../../models/User");
 const UserInteraction = require("../../models/UsersInteraction");
+const {
+  normalizeMainInterestIds,
+  normalizeSubInterestIds,
+  legacyToCanonicalSelection
+} = require("../../shared/interests");
 
 function flattenFeatureVector(features) {
   if (!features || typeof features !== "object") return {};
@@ -45,6 +50,25 @@ function calculateRankWeight(rank) {
  * Map user boolean preferences to interest categories
  */
 function mapPreferencesToInterests(preferences) {
+  const canonicalMainInterests = normalizeMainInterestIds(preferences?.mainInterests);
+  if (canonicalMainInterests.length) {
+    const mappedLabels = {
+      nature: "Nature Tourism",
+      diving: "Diving and Marine Sports Tourism",
+      sun_beach: "Sun and Beach Tourism",
+      health_wellness: "Health, Wellness, and Retirement Tourism",
+      events: "MICE and Events Tourism",
+      culture_heritage: "Cultural Tourism",
+      education: "Education Tourism",
+      cruise: "Cruise and Nautical Tourism",
+      leisure: "Leisure and Entertainment Tourism"
+    };
+
+    return canonicalMainInterests
+      .map((id) => mappedLabels[id])
+      .filter(Boolean);
+  }
+
   const interestMap = {
     natureTourism: 'Nature Tourism',
     culturalTourism: 'Cultural Tourism', 
@@ -190,13 +214,32 @@ async function getContentBasedRecommendations(userId) {
     };
   });
 
-  // If the user explicitly selected interests, suppress destinations that do not
-  // match any selected interest category.
-  const filteredDestinations = userInterests.length
-    ? scoredDestinations.filter((item) =>
-      userInterests.some((interest) => item.destination?.features?.[interest])
-    )
-    : scoredDestinations;
+  const selectedSubInterests = normalizeSubInterestIds(user.preferences?.subInterests);
+  const selectedMainInterests = normalizeMainInterestIds(user.preferences?.mainInterests);
+
+  const filteredDestinations = scoredDestinations.filter((item) => {
+    if (!selectedSubInterests.length && !selectedMainInterests.length) {
+      if (!userInterests.length) return true;
+      return userInterests.some((interest) => item.destination?.features?.[interest]);
+    }
+
+    const destinationMainInterests = normalizeMainInterestIds(item.destination?.mainInterests);
+    const destinationSubInterests = normalizeSubInterestIds(item.destination?.subInterests);
+    const destinationCanonical = destinationMainInterests.length || destinationSubInterests.length
+      ? { mainInterests: destinationMainInterests, subInterests: destinationSubInterests }
+      : legacyToCanonicalSelection({
+        categories: item.destination?.category,
+        features: item.destination?.features
+      });
+
+    if (selectedSubInterests.length) {
+      const destinationSubSet = new Set(destinationCanonical.subInterests);
+      return selectedSubInterests.some((id) => destinationSubSet.has(id));
+    }
+
+    const destinationMainSet = new Set(destinationCanonical.mainInterests);
+    return selectedMainInterests.some((id) => destinationMainSet.has(id));
+  });
 
   // Sort by highest combined score
   filteredDestinations.sort((a, b) => b.score - a.score);

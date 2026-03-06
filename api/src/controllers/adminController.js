@@ -16,6 +16,12 @@ const {
   getDefaultValidFeatures
 } = require("../utils/normalizeFeatures");
 const {
+  normalizeMainInterestIds,
+  normalizeSubInterestIds,
+  canonicalToLegacySelection,
+  legacyToCanonicalSelection
+} = require("../shared/interests");
+const {
   createSystemLog,
   allowedSeverities
 } = require("../services/systemLogService");
@@ -102,6 +108,73 @@ async function getValidFeaturesMap() {
   }
 
   return current;
+}
+
+function normalizeDestinationInterests({
+  sourceCategories,
+  sourceFeatures,
+  sourceMainInterests,
+  sourceSubInterests,
+  validFeaturesMap
+}) {
+  const normalizedMainInterests = normalizeMainInterestIds(sourceMainInterests);
+  const normalizedSubInterests = normalizeSubInterestIds(sourceSubInterests);
+
+  if (
+    Array.isArray(sourceMainInterests) &&
+    normalizedMainInterests.length !== sourceMainInterests.length
+  ) {
+    const err = new Error("mainInterests contains invalid IDs");
+    err.status = 400;
+    throw err;
+  }
+
+  if (
+    Array.isArray(sourceSubInterests) &&
+    normalizedSubInterests.length !== sourceSubInterests.length
+  ) {
+    const err = new Error("subInterests contains invalid IDs");
+    err.status = 400;
+    throw err;
+  }
+
+  const hasCanonicalInput = normalizedMainInterests.length > 0 || normalizedSubInterests.length > 0;
+
+  const legacyFromCanonical = hasCanonicalInput
+    ? canonicalToLegacySelection({
+      mainInterests: normalizedMainInterests,
+      subInterests: normalizedSubInterests
+    })
+    : { categories: [], features: {} };
+
+  const normalizedCategories = filterSupportedCategories(
+    normalizeCategories(
+      legacyFromCanonical.categories.length ? legacyFromCanonical.categories : sourceCategories
+    ),
+    validFeaturesMap
+  );
+
+  const normalizedFeatures = normalizeFeatures(
+    normalizedCategories,
+    Object.keys(legacyFromCanonical.features).length ? legacyFromCanonical.features : sourceFeatures,
+    validFeaturesMap
+  );
+
+  const inferredCanonical = legacyToCanonicalSelection({
+    categories: normalizedCategories,
+    features: normalizedFeatures
+  });
+
+  return {
+    categories: normalizedCategories,
+    features: normalizedFeatures,
+    mainInterests: normalizedMainInterests.length
+      ? normalizedMainInterests
+      : inferredCanonical.mainInterests,
+    subInterests: normalizedSubInterests.length
+      ? normalizedSubInterests
+      : inferredCanonical.subInterests
+  };
 }
 
 exports.getDestinationTaxonomy = async (_req, res) => {
@@ -391,6 +464,8 @@ exports.createDestination = async (req, res) => {
       category,
       categories,
       features,
+      mainInterests,
+      subInterests,
       estimatedCost,
       latitude,
       longitude
@@ -414,10 +489,14 @@ exports.createDestination = async (req, res) => {
     }
 
     const validFeaturesMap = await getValidFeaturesMap();
-    const normalizedCategories = filterSupportedCategories(
-      normalizeCategories(categories ?? category),
+    const normalizedInterestData = normalizeDestinationInterests({
+      sourceCategories: categories ?? category,
+      sourceFeatures: features,
+      sourceMainInterests: mainInterests,
+      sourceSubInterests: subInterests,
       validFeaturesMap
-    );
+    });
+    const normalizedCategories = normalizedInterestData.categories;
 
     if (!normalizedCategories.length) {
       return res.status(400).json({
@@ -425,11 +504,7 @@ exports.createDestination = async (req, res) => {
       });
     }
 
-    const normalizedFeatures = normalizeFeatures(
-      normalizedCategories,
-      features,
-      validFeaturesMap
-    );
+    const normalizedFeatures = normalizedInterestData.features;
 
     if (!Object.keys(normalizedFeatures).length) {
       return res.status(400).json({
@@ -460,6 +535,8 @@ exports.createDestination = async (req, res) => {
       description,
       category: normalizedCategories,
       features: normalizedFeatures,
+      mainInterests: normalizedInterestData.mainInterests,
+      subInterests: normalizedInterestData.subInterests,
       estimatedCost,
       location: {
         latitude: parsedLatitude,
@@ -480,6 +557,9 @@ exports.createDestination = async (req, res) => {
 
     res.status(201).json(destination);
   } catch (err) {
+    if (err.status === 400) {
+      return res.status(400).json({ message: err.message });
+    }
     console.error("Create destination error:", err);
     await logAdminAction(req, {
       severity: "Error",
@@ -545,8 +625,10 @@ exports.updateDestination = async (req, res) => {
       Object.prototype.hasOwnProperty.call(updates, "category") ||
       Object.prototype.hasOwnProperty.call(updates, "categories");
     const hasFeaturesUpdate = Object.prototype.hasOwnProperty.call(updates, "features");
+    const hasMainInterestsUpdate = Object.prototype.hasOwnProperty.call(updates, "mainInterests");
+    const hasSubInterestsUpdate = Object.prototype.hasOwnProperty.call(updates, "subInterests");
 
-    if (hasCategoryUpdate || hasFeaturesUpdate) {
+    if (hasCategoryUpdate || hasFeaturesUpdate || hasMainInterestsUpdate || hasSubInterestsUpdate) {
       const existingDestination = await Destination.findById(req.params.id);
       if (!existingDestination) {
         return res.status(404).json({ message: "Destination not found" });
@@ -556,47 +638,40 @@ exports.updateDestination = async (req, res) => {
       const sourceCategories = hasCategoryUpdate
         ? updates.categories ?? updates.category
         : existingDestination.category;
+      const sourceFeatures = hasFeaturesUpdate
+        ? updates.features
+        : existingDestination.features;
+      const sourceMainInterests = hasMainInterestsUpdate
+        ? updates.mainInterests
+        : existingDestination.mainInterests;
+      const sourceSubInterests = hasSubInterestsUpdate
+        ? updates.subInterests
+        : existingDestination.subInterests;
 
-      const normalizedCategories = filterSupportedCategories(
-        normalizeCategories(sourceCategories),
+      const normalizedInterestData = normalizeDestinationInterests({
+        sourceCategories,
+        sourceFeatures,
+        sourceMainInterests,
+        sourceSubInterests,
         validFeaturesMap
-      );
+      });
 
-      if (!normalizedCategories.length) {
+      if (!normalizedInterestData.categories.length) {
         return res.status(400).json({
           message: "At least one valid category is required"
         });
       }
 
-      let normalizedFeatures = existingDestination.features || {};
-      if (hasFeaturesUpdate) {
-        normalizedFeatures = normalizeFeatures(
-          normalizedCategories,
-          updates.features,
-          validFeaturesMap
-        );
-
-        if (!Object.keys(normalizedFeatures).length) {
-          return res.status(400).json({
-            message: "At least one valid feature is required"
-          });
-        }
-      } else if (normalizedFeatures && typeof normalizedFeatures === "object") {
-        const nestedFeatureMap = Object.values(normalizedFeatures).some((value) =>
-          value && typeof value === "object" && !Array.isArray(value)
-        );
-
-        if (nestedFeatureMap) {
-          normalizedFeatures = Object.fromEntries(
-            Object.entries(normalizedFeatures).filter(([cat]) =>
-              normalizedCategories.includes(cat)
-            )
-          );
-        }
+      if (!Object.keys(normalizedInterestData.features).length) {
+        return res.status(400).json({
+          message: "At least one valid feature is required"
+        });
       }
 
-      updates.category = normalizedCategories;
-      updates.features = normalizedFeatures;
+      updates.category = normalizedInterestData.categories;
+      updates.features = normalizedInterestData.features;
+      updates.mainInterests = normalizedInterestData.mainInterests;
+      updates.subInterests = normalizedInterestData.subInterests;
       delete updates.categories;
     }
 
@@ -620,6 +695,9 @@ exports.updateDestination = async (req, res) => {
 
     res.json(destination);
   } catch (err) {
+    if (err.status === 400) {
+      return res.status(400).json({ message: err.message });
+    }
     console.error(err);
     await logAdminAction(req, {
       severity: "Error",

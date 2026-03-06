@@ -1,4 +1,8 @@
 const mongoose = require("mongoose");
+const {
+  MAIN_INTEREST_IDS,
+  SUB_INTEREST_IDS
+} = require("../shared/interests");
 
 const PreferenceSchema = new mongoose.Schema(
   {
@@ -11,6 +15,16 @@ const PreferenceSchema = new mongoose.Schema(
     healthWelnessRetirementTourism: { type: Boolean, default: false },
     MICEAndEventsTourism: { type: Boolean, default: false },
     educationTourism: { type: Boolean, default: false },
+    mainInterests: {
+      type: [String],
+      enum: MAIN_INTEREST_IDS,
+      default: []
+    },
+    subInterests: {
+      type: [String],
+      enum: SUB_INTEREST_IDS,
+      default: []
+    },
     interestRanks: { 
       type: Map, 
       of: Number, 
