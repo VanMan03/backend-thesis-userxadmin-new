@@ -25,5 +25,6 @@ const RatingSchema = new mongoose.Schema(
 );
 
 RatingSchema.index({ user: 1, destination: 1 }, { unique: true });
+RatingSchema.index({ destination: 1, updatedAt: -1 });
 
 module.exports = mongoose.model("Rating", RatingSchema);

@@ -56,4 +56,8 @@ const RecommendationFeedbackSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+RecommendationFeedbackSchema.index({ eventType: 1, timestamp: -1 });
+RecommendationFeedbackSchema.index({ destinationId: 1, timestamp: -1 });
+RecommendationFeedbackSchema.index({ itineraryId: 1, timestamp: -1 });
+
 module.exports = mongoose.model("RecommendationFeedback", RecommendationFeedbackSchema);

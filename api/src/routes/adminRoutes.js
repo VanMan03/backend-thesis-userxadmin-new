@@ -20,7 +20,12 @@ const {
   createDestinationFeature,
   updateDestinationFeature,
   deleteDestinationFeature,
-  getCloudinaryUploadSignature
+  getCloudinaryUploadSignature,
+  getRatingsSummary,
+  getRatingsByDestination,
+  getFeedbackEvents,
+  getFeedbackSummary,
+  getAdminComments
 } = require("../controllers/adminController");
 
 const auth = require("../middleware/authMiddleware");
@@ -49,6 +54,11 @@ router.delete("/destination-taxonomy/categories/:category/features/:feature", au
 router.get("/users", auth, role("admin"), getAllUsers);
 router.get("/itineraries", auth, role("admin"), getAllItineraries);
 router.get("/logs", auth, role("admin"), getSystemLogs);
+router.get("/ratings/summary", auth, role("admin"), getRatingsSummary);
+router.get("/ratings/destination/:id", auth, role("admin"), getRatingsByDestination);
+router.get("/feedback/events", auth, role("admin"), getFeedbackEvents);
+router.get("/feedback/summary", auth, role("admin"), getFeedbackSummary);
+router.get("/comments", auth, role("admin"), getAdminComments);
 router.post("/routes/preview", auth, role("admin"), getRoutePreview);
 router.post("/cloudinary/signature", auth, role("admin"), getCloudinaryUploadSignature);
 

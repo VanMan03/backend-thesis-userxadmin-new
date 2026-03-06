@@ -4,6 +4,10 @@ const DestinationTaxonomy = require("../models/DestinationTaxonomy");
 const User = require("../models/User");
 const Itinerary = require("../models/Itinerary");
 const SystemLog = require("../models/SystemLog");
+const Rating = require("../models/Rating");
+const RecommendationFeedback = require("../models/RecommendationFeedback");
+const DestinationComment = require("../models/DestinationComment");
+const mongoose = require("mongoose");
 const {
   normalizeFeatures,
   normalizeCategories,
@@ -51,6 +55,13 @@ function parsePositiveInt(value, fallback) {
     return fallback;
   }
   return parsed;
+}
+
+function parseOptionalObjectId(value) {
+  if (typeof value !== "string" || !value.trim()) return null;
+  const trimmed = value.trim();
+  if (!mongoose.Types.ObjectId.isValid(trimmed)) return undefined;
+  return trimmed;
 }
 
 async function logAdminAction(req, payload) {
@@ -798,6 +809,326 @@ exports.getSystemLogs = async (req, res) => {
   } catch (err) {
     console.error("Get system logs error:", err);
     res.status(500).json({ message: "Server error" });
+  }
+};
+
+exports.getRatingsSummary = async (req, res) => {
+  try {
+    const topLimit = Math.min(parsePositiveInt(req.query.topLimit, 10), 50);
+    const [overview, distribution, topDestinations] = await Promise.all([
+      Rating.aggregate([
+        {
+          $group: {
+            _id: null,
+            totalRatings: { $sum: 1 },
+            averageRating: { $avg: "$rating" },
+            lastUpdatedAt: { $max: "$updatedAt" }
+          }
+        }
+      ]),
+      Rating.aggregate([
+        { $group: { _id: "$rating", count: { $sum: 1 } } },
+        { $sort: { _id: 1 } }
+      ]),
+      Rating.aggregate([
+        {
+          $group: {
+            _id: "$destination",
+            count: { $sum: 1 },
+            averageRating: { $avg: "$rating" },
+            lastUpdatedAt: { $max: "$updatedAt" }
+          }
+        },
+        { $sort: { count: -1, averageRating: -1 } },
+        { $limit: topLimit },
+        {
+          $lookup: {
+            from: "destinations",
+            localField: "_id",
+            foreignField: "_id",
+            as: "destination"
+          }
+        },
+        { $unwind: { path: "$destination", preserveNullAndEmptyArrays: true } }
+      ])
+    ]);
+
+    const base = overview[0] || { totalRatings: 0, averageRating: 0, lastUpdatedAt: null };
+    const ratingDistribution = [1, 2, 3, 4, 5].map((value) => {
+      const found = distribution.find((entry) => entry._id === value);
+      return { rating: value, count: found ? found.count : 0 };
+    });
+
+    return res.json({
+      totalRatings: base.totalRatings,
+      averageRating: Number((base.averageRating || 0).toFixed(2)),
+      lastUpdatedAt: base.lastUpdatedAt,
+      distribution: ratingDistribution,
+      topDestinations: topDestinations.map((entry) => ({
+        destinationId: entry._id.toString(),
+        destinationName: entry.destination?.name || null,
+        count: entry.count,
+        averageRating: Number((entry.averageRating || 0).toFixed(2)),
+        lastUpdatedAt: entry.lastUpdatedAt
+      }))
+    });
+  } catch (err) {
+    console.error("Get ratings summary error:", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+exports.getRatingsByDestination = async (req, res) => {
+  try {
+    const destinationId = req.params.id;
+    if (!mongoose.Types.ObjectId.isValid(destinationId)) {
+      return res.status(400).json({ message: "Invalid destination ID" });
+    }
+
+    const destination = await Destination.findById(destinationId).select("name isActive");
+    if (!destination) {
+      return res.status(404).json({ message: "Destination not found" });
+    }
+
+    const [overview, distribution, recentRatings] = await Promise.all([
+      Rating.aggregate([
+        { $match: { destination: new mongoose.Types.ObjectId(destinationId) } },
+        {
+          $group: {
+            _id: null,
+            totalRatings: { $sum: 1 },
+            averageRating: { $avg: "$rating" },
+            lastUpdatedAt: { $max: "$updatedAt" }
+          }
+        }
+      ]),
+      Rating.aggregate([
+        { $match: { destination: new mongoose.Types.ObjectId(destinationId) } },
+        { $group: { _id: "$rating", count: { $sum: 1 } } },
+        { $sort: { _id: 1 } }
+      ]),
+      Rating.find({ destination: destinationId })
+        .sort({ updatedAt: -1 })
+        .limit(Math.min(parsePositiveInt(req.query.limit, 30), 100))
+        .populate("user", "fullName email")
+    ]);
+
+    const base = overview[0] || { totalRatings: 0, averageRating: 0, lastUpdatedAt: null };
+    const ratingDistribution = [1, 2, 3, 4, 5].map((value) => {
+      const found = distribution.find((entry) => entry._id === value);
+      return { rating: value, count: found ? found.count : 0 };
+    });
+
+    return res.json({
+      destination: {
+        id: destination._id.toString(),
+        name: destination.name,
+        isActive: destination.isActive
+      },
+      totalRatings: base.totalRatings,
+      averageRating: Number((base.averageRating || 0).toFixed(2)),
+      lastUpdatedAt: base.lastUpdatedAt,
+      distribution: ratingDistribution,
+      ratings: recentRatings.map((entry) => ({
+        id: entry._id.toString(),
+        userId: entry.user?._id?.toString() || null,
+        userName: entry.user?.fullName || null,
+        userEmail: entry.user?.email || null,
+        rating: entry.rating,
+        updatedAt: entry.updatedAt
+      }))
+    });
+  } catch (err) {
+    console.error("Get destination ratings error:", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+exports.getFeedbackEvents = async (req, res) => {
+  try {
+    const eventType = typeof req.query.eventType === "string" ? req.query.eventType.trim() : "";
+    const destinationId = parseOptionalObjectId(req.query.destinationId);
+    const from = parseDateInput(req.query.from);
+    const to = parseDateInput(req.query.to);
+    const page = parsePositiveInt(req.query.page, 1);
+    const limit = Math.min(parsePositiveInt(req.query.limit, 50), 200);
+
+    if (req.query.destinationId && destinationId === undefined) {
+      return res.status(400).json({ message: "Invalid destinationId" });
+    }
+    if (req.query.from && !from) {
+      return res.status(400).json({ message: "Invalid from date" });
+    }
+    if (req.query.to && !to) {
+      return res.status(400).json({ message: "Invalid to date" });
+    }
+
+    const query = {};
+    if (eventType) query.eventType = eventType;
+    if (destinationId) query.destinationId = destinationId;
+    if (from || to) {
+      query.timestamp = {};
+      if (from) query.timestamp.$gte = from;
+      if (to) query.timestamp.$lte = to;
+    }
+
+    const skip = (page - 1) * limit;
+    const [events, total] = await Promise.all([
+      RecommendationFeedback.find(query)
+        .sort({ timestamp: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean(),
+      RecommendationFeedback.countDocuments(query)
+    ]);
+
+    return res.json({
+      events,
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit) || 1
+    });
+  } catch (err) {
+    console.error("Get feedback events error:", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+exports.getFeedbackSummary = async (req, res) => {
+  try {
+    const destinationId = parseOptionalObjectId(req.query.destinationId);
+    const from = parseDateInput(req.query.from);
+    const to = parseDateInput(req.query.to);
+
+    if (req.query.destinationId && destinationId === undefined) {
+      return res.status(400).json({ message: "Invalid destinationId" });
+    }
+    if (req.query.from && !from) {
+      return res.status(400).json({ message: "Invalid from date" });
+    }
+    if (req.query.to && !to) {
+      return res.status(400).json({ message: "Invalid to date" });
+    }
+
+    const match = {};
+    if (destinationId) match.destinationId = destinationId;
+    if (from || to) {
+      match.timestamp = {};
+      if (from) match.timestamp.$gte = from;
+      if (to) match.timestamp.$lte = to;
+    }
+
+    const [eventBreakdown, totals] = await Promise.all([
+      RecommendationFeedback.aggregate([
+        { $match: match },
+        { $group: { _id: "$eventType", count: { $sum: 1 } } },
+        { $sort: { count: -1 } }
+      ]),
+      RecommendationFeedback.aggregate([
+        { $match: match },
+        {
+          $group: {
+            _id: null,
+            totalEvents: { $sum: 1 },
+            uniqueSessions: { $addToSet: "$sessionId" },
+            uniqueUsers: { $addToSet: "$userId" },
+            firstSeenAt: { $min: "$timestamp" },
+            lastSeenAt: { $max: "$timestamp" }
+          }
+        }
+      ])
+    ]);
+
+    const summary = totals[0] || {
+      totalEvents: 0,
+      uniqueSessions: [],
+      uniqueUsers: [],
+      firstSeenAt: null,
+      lastSeenAt: null
+    };
+
+    return res.json({
+      totalEvents: summary.totalEvents,
+      uniqueSessionCount: summary.uniqueSessions.filter(Boolean).length,
+      uniqueUserCount: summary.uniqueUsers.filter(Boolean).length,
+      firstSeenAt: summary.firstSeenAt,
+      lastSeenAt: summary.lastSeenAt,
+      eventsByType: eventBreakdown.map((item) => ({
+        eventType: item._id,
+        count: item.count
+      }))
+    });
+  } catch (err) {
+    console.error("Get feedback summary error:", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+exports.getAdminComments = async (req, res) => {
+  try {
+    const destinationId = parseOptionalObjectId(req.query.destinationId);
+    const status = typeof req.query.status === "string" ? req.query.status.trim().toLowerCase() : "";
+    const from = parseDateInput(req.query.from);
+    const to = parseDateInput(req.query.to);
+    const page = parsePositiveInt(req.query.page, 1);
+    const limit = Math.min(parsePositiveInt(req.query.limit, 50), 200);
+
+    if (req.query.destinationId && destinationId === undefined) {
+      return res.status(400).json({ message: "Invalid destinationId" });
+    }
+    if (status && !["visible", "hidden"].includes(status)) {
+      return res.status(400).json({ message: "Invalid status filter" });
+    }
+    if (req.query.from && !from) {
+      return res.status(400).json({ message: "Invalid from date" });
+    }
+    if (req.query.to && !to) {
+      return res.status(400).json({ message: "Invalid to date" });
+    }
+
+    const query = {};
+    if (destinationId) query.destination = destinationId;
+    if (status) query.status = status;
+    if (from || to) {
+      query.createdAt = {};
+      if (from) query.createdAt.$gte = from;
+      if (to) query.createdAt.$lte = to;
+    }
+
+    const skip = (page - 1) * limit;
+    const [comments, total] = await Promise.all([
+      DestinationComment.find(query)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .populate("destination", "name")
+        .populate("user", "fullName email")
+        .lean(),
+      DestinationComment.countDocuments(query)
+    ]);
+
+    return res.json({
+      comments: comments.map((comment) => ({
+        id: comment._id.toString(),
+        destinationId: comment.destination?._id?.toString() || null,
+        destinationName: comment.destination?.name || null,
+        userId: comment.user?._id?.toString() || null,
+        userName: comment.user?.fullName || null,
+        userEmail: comment.user?.email || null,
+        body: comment.body,
+        status: comment.status,
+        createdAt: comment.createdAt,
+        updatedAt: comment.updatedAt
+      })),
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit) || 1
+    });
+  } catch (err) {
+    console.error("Get admin comments error:", err);
+    return res.status(500).json({ message: "Server error" });
   }
 };
 
