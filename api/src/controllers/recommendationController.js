@@ -13,7 +13,6 @@ const {
 
 const RecommendationFeedback = require("../models/RecommendationFeedback");
 const Destination = require("../models/Destination");
-const Rating = require("../models/Rating");
 const mongoose = require("mongoose");
 const { createSystemLog } = require("../services/systemLogService");
 const {
@@ -24,7 +23,8 @@ const {
   normalizeCollaborators
 } = require("../utils/collaboratorUtils");
 const {
-  recomputeDestinationRatingAggregate
+  upsertUserRatingAndAggregate,
+  clearUserRatingAndAggregate
 } = require("../services/destinationRatingAggregate");
 
 const FEEDBACK_EVENT_TYPES = new Set([
@@ -137,17 +137,11 @@ async function upsertRatingFromFeedbackEvent(event, fallbackUserId = null) {
   }
 
   if (cleared) {
-    await Rating.findOneAndDelete({ user: userId, destination: destinationId });
-    await recomputeDestinationRatingAggregate(destinationId);
+    await clearUserRatingAndAggregate({ userId, destinationId });
     return;
   }
 
-  await Rating.findOneAndUpdate(
-    { user: userId, destination: destinationId },
-    { $set: { rating } },
-    { upsert: true, new: true, setDefaultsOnInsert: true }
-  );
-  await recomputeDestinationRatingAggregate(destinationId);
+  await upsertUserRatingAndAggregate({ userId, destinationId, rating });
 }
 
 /**

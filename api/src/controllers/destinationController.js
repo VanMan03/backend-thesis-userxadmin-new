@@ -4,7 +4,8 @@ const Rating = require("../models/Rating");
 const DestinationComment = require("../models/DestinationComment");
 const mongoose = require("mongoose");
 const {
-  recomputeDestinationRatingAggregate,
+  upsertUserRatingAndAggregate,
+  clearUserRatingAndAggregate,
   withDestinationAggregate
 } = require("../services/destinationRatingAggregate");
 
@@ -42,6 +43,7 @@ function containsBlockedTerm(text) {
 
 exports.getAllDestinations = async (_req, res) => {
   try {
+    res.set("Cache-Control", "no-store");
     const destinations = await Destination.find({ isActive: true }).lean();
     res.json(destinations.map((item) => withDestinationAggregate(item)));
   } catch {
@@ -59,6 +61,7 @@ exports.getDestinationById = async (req, res) => {
       return res.status(400).json({ message: "Invalid destination ID" });
     }
 
+    res.set("Cache-Control", "no-store");
     const destination = await Destination.findOne({
       _id: id,
       isActive: true
@@ -97,15 +100,11 @@ exports.upsertDestinationRating = async (req, res) => {
       return res.status(404).json({ message: "Destination not found" });
     }
 
-    const updatedRating = await Rating.findOneAndUpdate(
-      {
-        user: req.user.id,
-        destination: destinationId
-      },
-      { $set: { rating } },
-      { upsert: true, new: true, setDefaultsOnInsert: true }
-    );
-    const aggregate = await recomputeDestinationRatingAggregate(destinationId);
+    const { updatedRating, aggregate } = await upsertUserRatingAndAggregate({
+      userId: req.user.id,
+      destinationId,
+      rating
+    });
 
     return res.status(200).json({
       destinationId: updatedRating.destination.toString(),
@@ -155,11 +154,10 @@ exports.clearDestinationRating = async (req, res) => {
       return res.status(404).json({ message: "Destination not found" });
     }
 
-    await Rating.findOneAndDelete({
-      user: req.user.id,
-      destination: destinationId
+    const aggregate = await clearUserRatingAndAggregate({
+      userId: req.user.id,
+      destinationId
     });
-    const aggregate = await recomputeDestinationRatingAggregate(destinationId);
 
     return res.status(200).json({
       destinationId,
