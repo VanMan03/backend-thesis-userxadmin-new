@@ -36,12 +36,80 @@ function normalizeIdList(input, allowedSet) {
   )];
 }
 
+function toSlug(value = "") {
+  return value
+    .toString()
+    .trim()
+    .toLowerCase()
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+const mainAliasToId = new Map(
+  MAIN_INTERESTS.flatMap((item) => ([
+    [item.id.toLowerCase(), item.id],
+    [`main-${toSlug(item.label)}`, item.id]
+  ]))
+);
+
+const subAliasToId = new Map(
+  SUB_INTERESTS.flatMap((item) => ([
+    [item.id.toLowerCase(), item.id],
+    [`sub-${toSlug(item.legacyCategory)}-${normalizeFeatureKey(item.legacyFeature)}`, item.id]
+  ]))
+);
+
+function resolveMainInterestId(rawValue) {
+  const value = rawValue?.toString().trim();
+  if (!value) return null;
+  if (MAIN_INTEREST_ID_SET.has(value)) return value;
+
+  const lowered = value.toLowerCase();
+  if (MAIN_INTEREST_ID_SET.has(lowered)) return lowered;
+  if (lowered.startsWith("main-")) {
+    const suffix = lowered.slice(5);
+    if (MAIN_INTEREST_ID_SET.has(suffix)) return suffix;
+  }
+  return mainAliasToId.get(lowered) || null;
+}
+
+function resolveSubInterestId(rawValue) {
+  const value = rawValue?.toString().trim();
+  if (!value) return null;
+  if (SUB_INTEREST_ID_SET.has(value)) return value;
+
+  const lowered = value.toLowerCase();
+  if (SUB_INTEREST_ID_SET.has(lowered)) return lowered;
+  if (lowered.startsWith("sub-")) {
+    const suffix = lowered.slice(4);
+    if (SUB_INTEREST_ID_SET.has(suffix)) return suffix;
+    const underscored = suffix.replace(/-/g, "_");
+    if (SUB_INTEREST_ID_SET.has(underscored)) return underscored;
+  }
+  return subAliasToId.get(lowered) || null;
+}
+
+function normalizeResolvedIdList(input, resolver) {
+  const values = Array.isArray(input)
+    ? input
+    : typeof input === "string"
+      ? [input]
+      : [];
+
+  return [...new Set(
+    values
+      .map((value) => resolver(value))
+      .filter(Boolean)
+  )];
+}
+
 function normalizeMainInterestIds(input) {
-  return normalizeIdList(input, MAIN_INTEREST_ID_SET);
+  return normalizeResolvedIdList(input, resolveMainInterestId);
 }
 
 function normalizeSubInterestIds(input) {
-  return normalizeIdList(input, SUB_INTEREST_ID_SET);
+  return normalizeResolvedIdList(input, resolveSubInterestId);
 }
 
 const mainLabelToId = new Map(

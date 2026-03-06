@@ -73,6 +73,12 @@ function hasIntersection(source = [], target = []) {
   return source.some((value) => targetSet.has(value));
 }
 
+function shouldIncludeInterestDebug(req) {
+  const queryFlag = req.query?.debugInterests;
+  const bodyFlag = req.body?.debugInterests;
+  return queryFlag === "1" || queryFlag === "true" || bodyFlag === true;
+}
+
 function extractInterestFilterFromRequest(body = {}) {
   const requestMainInterests = normalizeMainInterestIds(body.mainInterests);
   const requestSubInterests = normalizeSubInterestIds(body.subInterests);
@@ -233,6 +239,26 @@ function buildTwoStageCandidates(candidates = [], filter, minimumExactMatches = 
   };
 }
 
+function buildInterestDebugPayload({ requestBody = {}, featureFilter, candidates = [] }) {
+  const sample = candidates.slice(0, 5).map((item) => {
+    const normalized = normalizeDestinationInterests(item.destination);
+    return {
+      destinationId: item.destination?._id?.toString?.() || null,
+      comparedMainInterests: normalized.mainInterests,
+      comparedSubInterests: normalized.subInterests
+    };
+  });
+
+  return {
+    requestMainInterests: Array.isArray(requestBody.mainInterests) ? requestBody.mainInterests : [],
+    requestSubInterests: Array.isArray(requestBody.subInterests) ? requestBody.subInterests : [],
+    normalizedMainInterests: featureFilter.mainInterests,
+    normalizedSubInterests: featureFilter.subInterests,
+    mode: featureFilter.mode,
+    candidateComparisonSample: sample
+  };
+}
+
 async function logRecommendationEvent(req, payload) {
   await createSystemLog({
     ...payload,
@@ -353,6 +379,7 @@ exports.generateItinerary = async (req, res) => {
     const parsedBudget = Number(maxBudget);
     const normalizedDays = normalizeDays(days);
     const featureFilter = extractInterestFilterFromRequest(req.body);
+    const includeInterestDebug = shouldIncludeInterestDebug(req);
     if (featureFilter.invalid) {
       return res.status(400).json({ message: featureFilter.message });
     }
@@ -420,6 +447,14 @@ exports.generateItinerary = async (req, res) => {
     }
 
     if (!candidateResults.length) {
+      const interestDebug = includeInterestDebug
+        ? buildInterestDebugPayload({ requestBody: req.body, featureFilter, candidates: [] })
+        : undefined;
+
+      if (interestDebug) {
+        console.info("[recommendations] interest-filter debug", interestDebug);
+      }
+
       return res.status(200).json({
         mode: budgetMode,
         totalCost: 0,
@@ -431,7 +466,8 @@ exports.generateItinerary = async (req, res) => {
         itinerary: null,
         message: featureFilter.enabled
           ? "No active destinations match the selected interests"
-          : "No active destinations available"
+          : "No active destinations available",
+        ...(interestDebug ? { interestDebug } : {})
       });
     }
 
@@ -484,6 +520,13 @@ exports.generateItinerary = async (req, res) => {
       metadata: { budgetMode, days: normalizedDays }
     });
 
+    const interestDebug = includeInterestDebug
+      ? buildInterestDebugPayload({ requestBody: req.body, featureFilter, candidates: candidateResults })
+      : undefined;
+    if (interestDebug) {
+      console.info("[recommendations] interest-filter debug", interestDebug);
+    }
+
     res.json({
       mode: budgetMode,
       totalCost,
@@ -498,7 +541,8 @@ exports.generateItinerary = async (req, res) => {
         destination: item.destination,
         score: item.score
       })),
-      itinerary
+      itinerary,
+      ...(interestDebug ? { interestDebug } : {})
     });
   } catch (err) {
     console.error(err);
