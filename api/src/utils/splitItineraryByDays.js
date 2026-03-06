@@ -36,7 +36,7 @@ function mapPreferencesToInterests(preferences) {
     cruiseAndNauticalTourism: 'Cruise and Nautical Tourism',
     leisureAndEntertainmentTourism: 'Leisure and Entertainment Tourism',
     divingAndMarineSportsTourism: 'Diving and Marine Sports Tourism',
-    healthWelnessRetirementTourism: 'Health Wellness Retirement Tourism',
+    healthWelnessRetirementTourism: 'Health, Wellness, and Retirement Tourism',
     MICEAndEventsTourism: 'MICE and Events Tourism',
     educationTourism: 'Education Tourism'
   };

@@ -52,7 +52,7 @@ function mapPreferencesToInterests(preferences) {
     cruiseAndNauticalTourism: 'Cruise and Nautical Tourism',
     leisureAndEntertainmentTourism: 'Leisure and Entertainment Tourism',
     divingAndMarineSportsTourism: 'Diving and Marine Sports Tourism',
-    healthWelnessRetirementTourism: 'Health Wellness Retirement Tourism',
+    healthWelnessRetirementTourism: 'Health, Wellness, and Retirement Tourism',
     MICEAndEventsTourism: 'MICE and Events Tourism',
     educationTourism: 'Education Tourism'
   };
@@ -190,10 +190,18 @@ async function getContentBasedRecommendations(userId) {
     };
   });
 
-  // Sort by highest combined score
-  scoredDestinations.sort((a, b) => b.score - a.score);
+  // If the user explicitly selected interests, suppress destinations that do not
+  // match any selected interest category.
+  const filteredDestinations = userInterests.length
+    ? scoredDestinations.filter((item) =>
+      userInterests.some((interest) => item.destination?.features?.[interest])
+    )
+    : scoredDestinations;
 
-  return scoredDestinations;
+  // Sort by highest combined score
+  filteredDestinations.sort((a, b) => b.score - a.score);
+
+  return filteredDestinations;
 }
 
 module.exports = {

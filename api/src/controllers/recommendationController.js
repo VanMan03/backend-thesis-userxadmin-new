@@ -13,12 +13,19 @@ const {
 
 const RecommendationFeedback = require("../models/RecommendationFeedback");
 const Destination = require("../models/Destination");
+const DestinationTaxonomy = require("../models/DestinationTaxonomy");
 const mongoose = require("mongoose");
 const { createSystemLog } = require("../services/systemLogService");
 const {
   normalizeDays,
   splitDestinationsByDays
 } = require("../utils/splitItineraryByDays");
+const {
+  normalizeFeatures,
+  normalizeCategories,
+  sanitizeValidFeatures,
+  getDefaultValidFeatures
+} = require("../utils/normalizeFeatures");
 const {
   normalizeCollaborators
 } = require("../utils/collaboratorUtils");
@@ -61,6 +68,122 @@ const ITINERARY_EVENT_TO_LOG = {
     status: "Warning"
   }
 };
+
+const TAXONOMY_KEY = "default";
+
+function normalizeCategoryKey(value = "") {
+  return value.toString().trim().toLowerCase();
+}
+
+function normalizeFeatureKey(value = "") {
+  return value
+    .toString()
+    .replace(/&/g, "")
+    .replace(/\s+/g, "")
+    .replace(/-/g, "")
+    .toLowerCase();
+}
+
+function extractRequestSelectionFilter(body = {}) {
+  const hasSelectedFeatures = Object.prototype.hasOwnProperty.call(body, "selectedFeatures");
+  const hasFeatures = Object.prototype.hasOwnProperty.call(body, "features");
+  const selectedFeatures = hasSelectedFeatures
+    ? body.selectedFeatures
+    : hasFeatures
+      ? body.features
+      : null;
+
+  const explicitCategories = body.categories ?? body.category ?? [];
+  const inferredCategories =
+    selectedFeatures && typeof selectedFeatures === "object" && !Array.isArray(selectedFeatures)
+      ? Object.keys(selectedFeatures)
+      : [];
+
+  const categories = normalizeCategories([...normalizeCategories(explicitCategories), ...inferredCategories]);
+
+  return {
+    categories,
+    selectedFeatures,
+    requested: categories.length > 0 || selectedFeatures !== null
+  };
+}
+
+async function getValidFeaturesMap() {
+  const taxonomy = await DestinationTaxonomy.findOne({ key: TAXONOMY_KEY });
+  const sanitized = sanitizeValidFeatures(taxonomy?.validFeatures || {});
+  return Object.keys(sanitized).length ? sanitized : getDefaultValidFeatures();
+}
+
+async function buildFeatureFilter(body = {}) {
+  const requestFilter = extractRequestSelectionFilter(body);
+  if (!requestFilter.requested) {
+    return { enabled: false, categories: [], features: {} };
+  }
+
+  if (!requestFilter.categories.length) {
+    return { enabled: false, categories: [], features: {} };
+  }
+
+  const validFeaturesMap = await getValidFeaturesMap();
+  const normalizedFeatures = normalizeFeatures(
+    requestFilter.categories,
+    requestFilter.selectedFeatures || {},
+    validFeaturesMap
+  );
+
+  return {
+    enabled: true,
+    categories: requestFilter.categories,
+    features: normalizedFeatures
+  };
+}
+
+function destinationMatchesFeatureFilter(destination, filter) {
+  if (!filter?.enabled) return true;
+
+  const destinationFeatures = destination?.features && typeof destination.features === "object"
+    ? destination.features
+    : {};
+  const requestedCategories = filter.categories || [];
+
+  if (!requestedCategories.length) return true;
+
+  const destinationCategoryMap = new Map();
+  Object.keys(destinationFeatures).forEach((category) => {
+    destinationCategoryMap.set(normalizeCategoryKey(category), category);
+  });
+
+  // Any category/feature match is enough to include a destination.
+  return requestedCategories.some((requestedCategory) => {
+    const actualCategory = destinationCategoryMap.get(normalizeCategoryKey(requestedCategory));
+    if (!actualCategory) return false;
+
+    const selectedCategoryFeatures = filter.features?.[requestedCategory];
+    if (!selectedCategoryFeatures || !Object.keys(selectedCategoryFeatures).length) {
+      return true;
+    }
+
+    const destinationCategoryFeatures = destinationFeatures[actualCategory];
+    if (!destinationCategoryFeatures || typeof destinationCategoryFeatures !== "object") {
+      return false;
+    }
+
+    const destinationFeatureSet = new Set(
+      Object.entries(destinationCategoryFeatures)
+        .filter(([, value]) => value)
+        .map(([featureKey]) => normalizeFeatureKey(featureKey))
+    );
+
+    return Object.keys(selectedCategoryFeatures).some((featureKey) =>
+      destinationFeatureSet.has(normalizeFeatureKey(featureKey))
+    );
+  });
+}
+
+function filterRecommendationCandidates(candidates = [], filter) {
+  if (!filter?.enabled) return candidates;
+  return candidates.filter((item) => destinationMatchesFeatureFilter(item.destination, filter));
+}
 
 async function logRecommendationEvent(req, payload) {
   await createSystemLog({
@@ -181,6 +304,7 @@ exports.generateItinerary = async (req, res) => {
     } = req.body;
     const parsedBudget = Number(maxBudget);
     const normalizedDays = normalizeDays(days);
+    const featureFilter = await buildFeatureFilter(req.body);
     const collaboratorResult = await normalizeCollaborators({
       currentUserId: userId,
       travelStyle,
@@ -227,7 +351,7 @@ exports.generateItinerary = async (req, res) => {
         travelStyle: collaboratorResult.travelStyle
       })
       : await getHybridRecommendations(userId);
-    let candidateResults = hybridResults;
+    let candidateResults = filterRecommendationCandidates(hybridResults, featureFilter);
 
     // Fallback for new users/no interaction history.
     if (!candidateResults.length) {
@@ -235,10 +359,10 @@ exports.generateItinerary = async (req, res) => {
         .sort({ createdAt: -1 })
         .limit(50);
 
-      candidateResults = fallbackDestinations.map((destination) => ({
+      candidateResults = filterRecommendationCandidates(fallbackDestinations.map((destination) => ({
         destination,
         score: 0
-      }));
+      })), featureFilter);
     }
 
     if (!candidateResults.length) {
@@ -247,7 +371,9 @@ exports.generateItinerary = async (req, res) => {
         totalCost: 0,
         recommendations: [],
         itinerary: null,
-        message: "No active destinations available"
+        message: featureFilter.enabled
+          ? "No active destinations match the selected categories/features"
+          : "No active destinations available"
       });
     }
 
