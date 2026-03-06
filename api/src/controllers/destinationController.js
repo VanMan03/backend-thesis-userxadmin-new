@@ -3,6 +3,10 @@ const Destination = require("../models/Destination");
 const Rating = require("../models/Rating");
 const DestinationComment = require("../models/DestinationComment");
 const mongoose = require("mongoose");
+const {
+  recomputeDestinationRatingAggregate,
+  withDestinationAggregate
+} = require("../services/destinationRatingAggregate");
 
 const COMMENT_MAX_LENGTH = 1000;
 const BLOCKED_TERMS = [
@@ -38,8 +42,8 @@ function containsBlockedTerm(text) {
 
 exports.getAllDestinations = async (_req, res) => {
   try {
-    const destinations = await Destination.find({ isActive: true });
-    res.json(destinations);
+    const destinations = await Destination.find({ isActive: true }).lean();
+    res.json(destinations.map((item) => withDestinationAggregate(item)));
   } catch {
     res.status(500).json({ message: "Server error" });
   }
@@ -58,13 +62,13 @@ exports.getDestinationById = async (req, res) => {
     const destination = await Destination.findOne({
       _id: id,
       isActive: true
-    });
+    }).lean();
 
     if (!destination) {
       return res.status(404).json({ message: "Destination not found" });
     }
 
-    res.json(destination);
+    res.json(withDestinationAggregate(destination));
   } catch (err) {
     console.error(err);
     res.status(500).json({ message: "Server error" });
@@ -101,11 +105,14 @@ exports.upsertDestinationRating = async (req, res) => {
       { $set: { rating } },
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
+    const aggregate = await recomputeDestinationRatingAggregate(destinationId);
 
     return res.status(200).json({
       destinationId: updatedRating.destination.toString(),
-      rating: updatedRating.rating,
-      updatedAt: updatedRating.updatedAt
+      userRating: updatedRating.rating,
+      updatedAt: updatedRating.updatedAt,
+      rating: aggregate.rating,
+      reviewCount: aggregate.reviewCount
     });
   } catch (err) {
     console.error(err);
@@ -152,8 +159,13 @@ exports.clearDestinationRating = async (req, res) => {
       user: req.user.id,
       destination: destinationId
     });
+    const aggregate = await recomputeDestinationRatingAggregate(destinationId);
 
-    return res.status(204).send();
+    return res.status(200).json({
+      destinationId,
+      rating: aggregate.rating,
+      reviewCount: aggregate.reviewCount
+    });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ message: "Server error" });

@@ -23,6 +23,9 @@ const {
 const {
   normalizeCollaborators
 } = require("../utils/collaboratorUtils");
+const {
+  recomputeDestinationRatingAggregate
+} = require("../services/destinationRatingAggregate");
 
 const FEEDBACK_EVENT_TYPES = new Set([
   "recommendation_requested",
@@ -135,6 +138,7 @@ async function upsertRatingFromFeedbackEvent(event, fallbackUserId = null) {
 
   if (cleared) {
     await Rating.findOneAndDelete({ user: userId, destination: destinationId });
+    await recomputeDestinationRatingAggregate(destinationId);
     return;
   }
 
@@ -143,6 +147,7 @@ async function upsertRatingFromFeedbackEvent(event, fallbackUserId = null) {
     { $set: { rating } },
     { upsert: true, new: true, setDefaultsOnInsert: true }
   );
+  await recomputeDestinationRatingAggregate(destinationId);
 }
 
 /**
