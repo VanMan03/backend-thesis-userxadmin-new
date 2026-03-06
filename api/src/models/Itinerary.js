@@ -89,6 +89,13 @@ budgetMode: {
       }
     ],
 
+    hiddenFor: [
+      {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "User"
+      }
+    ],
+
 
     isSaved: {
       type: Boolean,

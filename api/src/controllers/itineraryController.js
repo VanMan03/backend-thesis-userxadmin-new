@@ -116,7 +116,10 @@ exports.createItinerary = async (req, res) => {
 exports.getUserItineraries = async (req, res) => {
   try {
     const itineraries = await Itinerary.find({
-      $or: [{ user: req.user.id }, { collaboratorIds: req.user.id }]
+      $and: [
+        { $or: [{ user: req.user.id }, { collaboratorIds: req.user.id }] },
+        { hiddenFor: { $ne: req.user.id } }
+      ]
     })
       .populate("destinations.destination")
       .populate("dayPlans.destinations.destination")
@@ -131,6 +134,7 @@ exports.getUserItineraries = async (req, res) => {
 exports.deleteUserItinerary = async (req, res) => {
   try {
     const { id } = req.params;
+    const userId = req.user.id;
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
       await logItineraryEvent(req, {
@@ -143,28 +147,55 @@ exports.deleteUserItinerary = async (req, res) => {
       return res.status(400).json({ message: "Invalid itinerary ID" });
     }
 
-    const deletedItinerary = await Itinerary.findOneAndDelete({ _id: id, user: req.user.id });
+    const itinerary = await Itinerary.findOne({
+      _id: id,
+      $or: [{ user: userId }, { collaboratorIds: userId }]
+    });
 
-    if (!deletedItinerary) {
+    if (!itinerary) {
       await logItineraryEvent(req, {
         severity: "Warning",
         event: "Itinerary delete failed",
-        description: "Itinerary not found",
+        description: "Itinerary not found or access denied",
         status: "Failed",
         metadata: { itineraryId: id }
       });
       return res.status(404).json({ message: "Itinerary not found" });
     }
 
+    const isOwner = itinerary.user?.toString() === userId.toString();
+
+    if (isOwner) {
+      await Itinerary.deleteOne({ _id: id });
+
+      await logItineraryEvent(req, {
+        severity: "Info",
+        event: "Itinerary deleted",
+        description: "Owner deleted itinerary for all users.",
+        status: "Success",
+        metadata: { itineraryId: id }
+      });
+
+      return res.json({ message: "Itinerary deleted successfully" });
+    }
+
+    await Itinerary.updateOne(
+      { _id: id },
+      {
+        $addToSet: { hiddenFor: userId },
+        $pull: { collaboratorIds: userId }
+      }
+    );
+
     await logItineraryEvent(req, {
       severity: "Info",
-      event: "Itinerary deleted",
-      description: "User deleted itinerary.",
+      event: "Itinerary removed",
+      description: "Collaborator removed itinerary from own account.",
       status: "Success",
       metadata: { itineraryId: id }
     });
 
-    res.json({ message: "Itinerary deleted successfully" });
+    return res.json({ message: "Itinerary removed from your account" });
   } catch (err) {
     await logItineraryEvent(req, {
       severity: "Error",

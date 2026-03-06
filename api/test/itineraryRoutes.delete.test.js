@@ -14,7 +14,9 @@ const User = require("../src/models/User");
 const Itinerary = require("../src/models/Itinerary");
 
 const originalFindById = User.findById;
-const originalFindOneAndDelete = Itinerary.findOneAndDelete;
+const originalFindOne = Itinerary.findOne;
+const originalDeleteOne = Itinerary.deleteOne;
+const originalUpdateOne = Itinerary.updateOne;
 
 const authUserId = new mongoose.Types.ObjectId().toString();
 const token = jwt.sign({ id: authUserId }, process.env.JWT_SECRET);
@@ -37,7 +39,9 @@ test.before(async () => {
 
 test.after(async () => {
   User.findById = originalFindById;
-  Itinerary.findOneAndDelete = originalFindOneAndDelete;
+  Itinerary.findOne = originalFindOne;
+  Itinerary.deleteOne = originalDeleteOne;
+  Itinerary.updateOne = originalUpdateOne;
 
   if (server) {
     await new Promise((resolve) => server.close(resolve));
@@ -46,7 +50,7 @@ test.after(async () => {
 
 test("DELETE /api/itineraries/:id returns 400 for invalid itinerary id", async () => {
   let called = false;
-  Itinerary.findOneAndDelete = async () => {
+  Itinerary.findOne = async () => {
     called = true;
     return null;
   };
@@ -69,7 +73,7 @@ test("DELETE /api/itineraries/:id returns 404 when itinerary does not exist for 
   const itineraryId = new mongoose.Types.ObjectId().toString();
   let querySeen = null;
 
-  Itinerary.findOneAndDelete = async (query) => {
+  Itinerary.findOne = async (query) => {
     querySeen = query;
     return null;
   };
@@ -86,16 +90,21 @@ test("DELETE /api/itineraries/:id returns 404 when itinerary does not exist for 
   assert.equal(response.status, 404);
   assert.equal(body.message, "Itinerary not found");
   assert.equal(querySeen._id, itineraryId);
-  assert.equal(querySeen.user, authUserId);
+  assert.equal(querySeen.$or[0].user, authUserId);
 });
 
 test("DELETE /api/itineraries/:id deletes a user itinerary and returns 200", async () => {
   const itineraryId = new mongoose.Types.ObjectId().toString();
   let querySeen = null;
+  let deleteQuerySeen = null;
 
-  Itinerary.findOneAndDelete = async (query) => {
+  Itinerary.findOne = async (query) => {
     querySeen = query;
-    return { _id: itineraryId };
+    return { _id: itineraryId, user: authUserId };
+  };
+  Itinerary.deleteOne = async (query) => {
+    deleteQuerySeen = query;
+    return { acknowledged: true, deletedCount: 1 };
   };
 
   const response = await fetch(`${baseUrl}/api/itineraries/${itineraryId}`, {
@@ -110,7 +119,40 @@ test("DELETE /api/itineraries/:id deletes a user itinerary and returns 200", asy
   assert.equal(response.status, 200);
   assert.equal(body.message, "Itinerary deleted successfully");
   assert.equal(querySeen._id, itineraryId);
-  assert.equal(querySeen.user, authUserId);
+  assert.equal(querySeen.$or[0].user, authUserId);
+  assert.equal(deleteQuerySeen._id, itineraryId);
+});
+
+test("DELETE /api/itineraries/:id hides itinerary for collaborator and returns 200", async () => {
+  const itineraryId = new mongoose.Types.ObjectId().toString();
+  const ownerId = new mongoose.Types.ObjectId().toString();
+  let updateQuerySeen = null;
+  let updateSeen = null;
+
+  Itinerary.findOne = async () => ({
+    _id: itineraryId,
+    user: ownerId
+  });
+  Itinerary.updateOne = async (query, update) => {
+    updateQuerySeen = query;
+    updateSeen = update;
+    return { acknowledged: true, modifiedCount: 1 };
+  };
+
+  const response = await fetch(`${baseUrl}/api/itineraries/${itineraryId}`, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  });
+
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.equal(body.message, "Itinerary removed from your account");
+  assert.equal(updateQuerySeen._id, itineraryId);
+  assert.equal(updateSeen.$addToSet.hiddenFor, authUserId);
+  assert.equal(updateSeen.$pull.collaboratorIds, authUserId);
 });
 
 test("DELETE /api/itineraries/:id returns 401 when token is missing", async () => {
