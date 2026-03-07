@@ -39,6 +39,111 @@ function parseCoordinate(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function hasOwn(source, key) {
+  return Object.prototype.hasOwnProperty.call(source, key);
+}
+
+function resolveCoordinateInput(payload = {}) {
+  const location = payload?.location && typeof payload.location === "object"
+    ? payload.location
+    : {};
+
+  const latProvided =
+    hasOwn(payload, "latitude") ||
+    hasOwn(payload, "lat") ||
+    hasOwn(location, "latitude") ||
+    hasOwn(location, "lat");
+  const lngProvided =
+    hasOwn(payload, "longitude") ||
+    hasOwn(payload, "lng") ||
+    hasOwn(location, "longitude") ||
+    hasOwn(location, "lng");
+
+  const rawLatitude = hasOwn(payload, "latitude")
+    ? payload.latitude
+    : hasOwn(payload, "lat")
+      ? payload.lat
+      : hasOwn(location, "latitude")
+        ? location.latitude
+        : location.lat;
+
+  const rawLongitude = hasOwn(payload, "longitude")
+    ? payload.longitude
+    : hasOwn(payload, "lng")
+      ? payload.lng
+      : hasOwn(location, "longitude")
+        ? location.longitude
+        : location.lng;
+
+  return {
+    hasAny: latProvided || lngProvided,
+    latitude: parseCoordinate(rawLatitude),
+    longitude: parseCoordinate(rawLongitude)
+  };
+}
+
+function normalizeOptionalString(value, label) {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "string") {
+    const err = new Error(`${label} must be a string`);
+    err.status = 400;
+    throw err;
+  }
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
+
+function extractAddressInput(payload = {}) {
+  const sourceAddress = payload.address && typeof payload.address === "object"
+    ? payload.address
+    : {};
+  const fields = ["purok", "barangay", "municipality", "province", "fullAddress"];
+  const hasAddressObject = hasOwn(payload, "address");
+  const hasFlatFields = fields.some((field) => hasOwn(payload, field)) ||
+    hasOwn(payload, "city") ||
+    hasOwn(sourceAddress, "city");
+  const hasAny = hasAddressObject || hasFlatFields;
+
+  if (!hasAny) {
+    return { hasAny: false, value: undefined };
+  }
+
+  if (hasAddressObject && payload.address !== null && typeof payload.address !== "object") {
+    const err = new Error("address must be an object");
+    err.status = 400;
+    throw err;
+  }
+
+  if (payload.address === null) {
+    return { hasAny: true, value: null };
+  }
+
+  const normalized = {};
+  for (const field of fields) {
+    let rawValue;
+    if (field === "municipality") {
+      rawValue = hasOwn(sourceAddress, "municipality")
+        ? sourceAddress.municipality
+        : hasOwn(payload, "municipality")
+          ? payload.municipality
+          : hasOwn(sourceAddress, "city")
+            ? sourceAddress.city
+            : payload.city;
+    } else {
+      rawValue = hasOwn(sourceAddress, field) ? sourceAddress[field] : payload[field];
+    }
+    const normalizedValue = normalizeOptionalString(rawValue, `address.${field}`);
+    if (normalizedValue !== undefined) {
+      normalized[field] = normalizedValue;
+    }
+  }
+
+  return {
+    hasAny: true,
+    value: Object.keys(normalized).length ? normalized : {}
+  };
+}
+
 function parseTaxonomyKey(value) {
   if (typeof value !== "string") return "";
   return decodeURIComponent(value).trim();
@@ -466,17 +571,16 @@ exports.createDestination = async (req, res) => {
       features,
       mainInterests,
       subInterests,
-      estimatedCost,
-      latitude,
-      longitude
+      estimatedCost
     } = req.body;
 
-    const parsedLatitude = parseCoordinate(latitude);
-    const parsedLongitude = parseCoordinate(longitude);
+    const coordinateInput = resolveCoordinateInput(req.body);
+    const parsedLatitude = coordinateInput.latitude;
+    const parsedLongitude = coordinateInput.longitude;
 
     if (parsedLatitude === null || parsedLongitude === null) {
       return res.status(400).json({
-        message: "latitude and longitude are required numbers"
+        message: "location coordinates are required numbers (latitude/longitude or lat/lng)"
       });
     }
 
@@ -529,6 +633,7 @@ exports.createDestination = async (req, res) => {
     const uploadedImages = Array.isArray(req.body.images)
       ? req.body.images
       : [];
+    const addressInput = extractAddressInput(req.body);
 
     const destination = await Destination.create({
       name,
@@ -539,10 +644,13 @@ exports.createDestination = async (req, res) => {
       subInterests: normalizedInterestData.subInterests,
       estimatedCost,
       location: {
+        lat: parsedLatitude,
+        lng: parsedLongitude,
         latitude: parsedLatitude,
         longitude: parsedLongitude,
         resolvedAddress
       },
+      address: addressInput.value,
       images: uploadedImages,
       isActive: true
     });
@@ -576,17 +684,17 @@ exports.createDestination = async (req, res) => {
 exports.updateDestination = async (req, res) => {
   try {
     const updates = { ...req.body };
+    const addressInput = extractAddressInput(updates);
 
-    const hasLatitude = Object.prototype.hasOwnProperty.call(updates, "latitude");
-    const hasLongitude = Object.prototype.hasOwnProperty.call(updates, "longitude");
+    const coordinateInput = resolveCoordinateInput(updates);
 
-    if (hasLatitude || hasLongitude) {
-      const parsedLatitude = parseCoordinate(updates.latitude);
-      const parsedLongitude = parseCoordinate(updates.longitude);
+    if (coordinateInput.hasAny) {
+      const parsedLatitude = coordinateInput.latitude;
+      const parsedLongitude = coordinateInput.longitude;
 
       if (parsedLatitude === null || parsedLongitude === null) {
         return res.status(400).json({
-          message: "latitude and longitude are required together as numbers"
+          message: "location coordinates are required together as numbers (latitude/longitude or lat/lng)"
         });
       }
 
@@ -612,13 +720,28 @@ exports.updateDestination = async (req, res) => {
         }
       }
 
+      delete updates.latitude;
+      delete updates.longitude;
+      delete updates.lat;
+      delete updates.lng;
+      delete updates.location;
       updates.location = {
+        lat: parsedLatitude,
+        lng: parsedLongitude,
         latitude: parsedLatitude,
         longitude: parsedLongitude,
         resolvedAddress
       };
-      delete updates.latitude;
-      delete updates.longitude;
+    }
+
+    if (addressInput.hasAny) {
+      updates.address = addressInput.value;
+      delete updates.purok;
+      delete updates.barangay;
+      delete updates.city;
+      delete updates.municipality;
+      delete updates.province;
+      delete updates.fullAddress;
     }
 
     const hasCategoryUpdate =

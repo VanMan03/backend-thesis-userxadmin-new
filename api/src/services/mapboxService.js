@@ -61,11 +61,17 @@ function wrapMapboxError(prefix, error) {
   return wrapped;
 }
 
+function getDestinationCoordinates(destination) {
+  const latitude = Number(destination?.location?.latitude ?? destination?.location?.lat);
+  const longitude = Number(destination?.location?.longitude ?? destination?.location?.lng);
+  return { latitude, longitude };
+}
+
 /**
  * Reverse geocode coordinates to get address components
  * @param {number} longitude 
  * @param {number} latitude 
- * @returns {Promise<Object>} Resolved address with barangay, city, province
+ * @returns {Promise<Object>} Resolved address with barangay, municipality, province
  */
 async function reverseGeocode(longitude, latitude) {
   try {
@@ -86,7 +92,7 @@ async function reverseGeocode(longitude, latitude) {
     const addressComponents = {
       fullAddress: feature.place_name || '',
       barangay: '',
-      city: '',
+      municipality: '',
       province: '',
       country: '',
       postcode: ''
@@ -98,7 +104,7 @@ async function reverseGeocode(longitude, latitude) {
       if (id.startsWith('address.')) {
         addressComponents.barangay = item.text || '';
       } else if (id.startsWith('place.')) {
-        addressComponents.city = item.text || '';
+        addressComponents.municipality = item.text || '';
       } else if (id.startsWith('region.')) {
         addressComponents.province = item.text || '';
       } else if (id.startsWith('country.')) {
@@ -210,10 +216,10 @@ async function sortDestinationsByDistance({
       return [];
     }
 
-    const destinationCoords = destinations.map(dest => [
-      dest.location.longitude,
-      dest.location.latitude
-    ]);
+    const destinationCoords = destinations.map((dest) => {
+      const { latitude, longitude } = getDestinationCoordinates(dest);
+      return [longitude, latitude];
+    });
 
     const matrix = await getDistanceMatrix({
       origins: [[userLongitude, userLatitude]],
@@ -269,7 +275,10 @@ async function optimizeRoute({
     // Prepare coordinates for optimization
     const coordinates = [
       [userLongitude, userLatitude], // Start point
-      ...destinations.map(dest => [dest.location.longitude, dest.location.latitude])
+      ...destinations.map((dest) => {
+        const { latitude, longitude } = getDestinationCoordinates(dest);
+        return [longitude, latitude];
+      })
     ];
 
     const normalizedProfile = normalizeMapboxProfile(profile);

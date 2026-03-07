@@ -41,26 +41,43 @@ const DestinationSchema = new mongoose.Schema(
   },
 
     location: {
-      latitude: {
+      lat: {
         type: Number,
         required: true,
         min: -90,
         max: 90
       },
-      longitude: {
+      lng: {
         type: Number,
         required: true,
+        min: -180,
+        max: 180
+      },
+      latitude: {
+        type: Number,
+        min: -90,
+        max: 90
+      },
+      longitude: {
+        type: Number,
         min: -180,
         max: 180
       },
       resolvedAddress: {
         fullAddress: String,
         barangay: String,
-        city: String,
+        municipality: String,
         province: String,
         country: String,
         postcode: String
       }
+    },
+    address: {
+      purok: String,
+      barangay: String,
+      municipality: String,
+      province: String,
+      fullAddress: String
     },
 
     isActive: {
@@ -97,5 +114,23 @@ images: {
 DestinationSchema.path("images").validate(function (val) {
   return val.length <= 4;
 }, "Maximum of 4 images allowed");
+
+DestinationSchema.pre("validate", function syncLocationCoordinateKeys(next) {
+  if (this.location && typeof this.location === "object") {
+    if (Number.isFinite(this.location.lat) && !Number.isFinite(this.location.latitude)) {
+      this.location.latitude = this.location.lat;
+    }
+    if (Number.isFinite(this.location.latitude) && !Number.isFinite(this.location.lat)) {
+      this.location.lat = this.location.latitude;
+    }
+    if (Number.isFinite(this.location.lng) && !Number.isFinite(this.location.longitude)) {
+      this.location.longitude = this.location.lng;
+    }
+    if (Number.isFinite(this.location.longitude) && !Number.isFinite(this.location.lng)) {
+      this.location.lng = this.location.longitude;
+    }
+  }
+  next();
+});
 
 module.exports = mongoose.model("Destination", DestinationSchema);

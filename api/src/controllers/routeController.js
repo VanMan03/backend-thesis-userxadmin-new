@@ -104,6 +104,14 @@ function resolveSingleRouteCoordinates(body, query) {
   };
 }
 
+function getDestinationCoords(destination) {
+  const location = destination?.location || {};
+  return {
+    longitude: toNumber(location.longitude ?? location.lng),
+    latitude: toNumber(location.latitude ?? location.lat)
+  };
+}
+
 /**
  * Get route between user location and a single destination
  */
@@ -142,8 +150,9 @@ exports.getSingleRoute = async (req, res) => {
         return res.status(404).json({ message: "Destination not found" });
       }
 
-      resolvedEndLongitude = toNumber(destination.location.longitude);
-      resolvedEndLatitude = toNumber(destination.location.latitude);
+      const coords = getDestinationCoords(destination);
+      resolvedEndLongitude = coords.longitude;
+      resolvedEndLatitude = coords.latitude;
     }
 
     if (resolvedEndLongitude === null || resolvedEndLatitude === null) {
@@ -315,10 +324,10 @@ exports.getRouteMatrix = async (req, res) => {
 
     const { getDistanceMatrix } = require("../services/mapboxService");
     
-    const destinationCoords = destinations.map(dest => [
-      dest.location.longitude,
-      dest.location.latitude
-    ]);
+    const destinationCoords = destinations.map((dest) => {
+      const coords = getDestinationCoords(dest);
+      return [coords.longitude, coords.latitude];
+    });
 
     const matrix = await getDistanceMatrix({
       origins: [[Number(userLongitude), Number(userLatitude)]],
