@@ -67,6 +67,72 @@ const ITINERARY_EVENT_TO_LOG = {
   }
 };
 
+const ITINERARY_MODEL_VERSION = "itinerary-knapsack-v1";
+
+function sendPayloadError(res, code, message, details = {}) {
+  return res.status(400).json({
+    error: {
+      code,
+      message,
+      details
+    }
+  });
+}
+
+function normalizeNonNegativeInteger(value) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) return 0;
+  return Math.max(0, Math.floor(numericValue));
+}
+
+function roundToTwo(value) {
+  return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+}
+
+function buildRankMap(interestRanks) {
+  if (!interestRanks || typeof interestRanks !== "object") {
+    return new Map();
+  }
+
+  if (interestRanks instanceof Map) {
+    return new Map(interestRanks.entries());
+  }
+
+  return new Map(Object.entries(interestRanks));
+}
+
+function rankWeight(rank) {
+  const numericRank = Number(rank);
+  if (!Number.isFinite(numericRank) || numericRank < 1 || numericRank > 9) {
+    return 1;
+  }
+  return 1 + ((10 - numericRank) / 10);
+}
+
+function computePreferenceScore(destination, preferences) {
+  const destinationInterests = normalizeDestinationInterests(destination);
+  const destinationMainSet = new Set(destinationInterests.mainInterests);
+  const destinationSubSet = new Set(destinationInterests.subInterests);
+  const rankMap = buildRankMap(preferences.interestRanks);
+
+  let score = 0;
+
+  preferences.mainInterests.forEach((interestId) => {
+    if (!destinationMainSet.has(interestId)) return;
+    score += 18 * rankWeight(rankMap.get(interestId));
+  });
+
+  preferences.subInterests.forEach((interestId) => {
+    if (!destinationSubSet.has(interestId)) return;
+    score += 24 * rankWeight(rankMap.get(interestId));
+  });
+
+  score += (Number(destination.rating) || 0) * 2;
+  score += Math.log10((Number(destination.reviewCount) || 0) + 1);
+
+  return roundToTwo(score);
+}
+
 function hasIntersection(source = [], target = []) {
   if (!source.length || !target.length) return false;
   const targetSet = new Set(target);
@@ -553,6 +619,186 @@ exports.generateItinerary = async (req, res) => {
       status: "Failed"
     });
     res.status(500).json({ message: "Server error" });
+  }
+};
+
+/**
+ * Generate itinerary with strict budget optimization contract
+ * POST /api/itineraries/generate
+ */
+exports.generateItineraryBudgetOptimized = async (req, res) => {
+  try {
+    const {
+      budgetMode,
+      maxBudget,
+      days,
+      mainInterests,
+      subInterests,
+      interestRanks,
+      activityLevel,
+      timePreference
+    } = req.body;
+
+    if (!["constrained", "unconstrained"].includes(budgetMode)) {
+      return sendPayloadError(
+        res,
+        "INVALID_BUDGET_MODE",
+        "budgetMode must be either 'constrained' or 'unconstrained'",
+        { budgetMode }
+      );
+    }
+
+    const normalizedDays = normalizeDays(days);
+    if (days !== undefined && normalizedDays === null) {
+      return sendPayloadError(
+        res,
+        "INVALID_DAYS",
+        "days must be a positive integer",
+        { days }
+      );
+    }
+
+    const normalizedMainInterests = normalizeMainInterestIds(mainInterests);
+    if (
+      Array.isArray(mainInterests) &&
+      normalizedMainInterests.length !== mainInterests.length
+    ) {
+      return sendPayloadError(
+        res,
+        "INVALID_MAIN_INTERESTS",
+        "mainInterests contains invalid IDs",
+        { mainInterests }
+      );
+    }
+
+    const normalizedSubInterests = normalizeSubInterestIds(subInterests);
+    if (
+      Array.isArray(subInterests) &&
+      normalizedSubInterests.length !== subInterests.length
+    ) {
+      return sendPayloadError(
+        res,
+        "INVALID_SUB_INTERESTS",
+        "subInterests contains invalid IDs",
+        { subInterests }
+      );
+    }
+
+    if (
+      interestRanks !== undefined &&
+      (interestRanks === null || typeof interestRanks !== "object" || Array.isArray(interestRanks))
+    ) {
+      return sendPayloadError(
+        res,
+        "INVALID_INTEREST_RANKS",
+        "interestRanks must be an object",
+        { interestRanks }
+      );
+    }
+
+    let normalizedMaxBudget = null;
+    if (budgetMode === "constrained") {
+      const parsed = Number(maxBudget);
+      if (!Number.isInteger(parsed) || parsed < 1) {
+        return sendPayloadError(
+          res,
+          "INVALID_MAX_BUDGET",
+          "maxBudget must be an integer greater than or equal to 1 when budgetMode is 'constrained'",
+          { maxBudget }
+        );
+      }
+      normalizedMaxBudget = parsed;
+    }
+
+    const preferences = {
+      mainInterests: normalizedMainInterests,
+      subInterests: normalizedSubInterests,
+      interestRanks: interestRanks || {},
+      activityLevel: activityLevel || null,
+      timePreference: timePreference || null
+    };
+
+    const candidates = await Destination.find({ isActive: true });
+    const items = candidates.map((candidate) => {
+      const normalizedDestination = candidate.toObject();
+      normalizedDestination.estimatedCost = normalizeNonNegativeInteger(
+        normalizedDestination.estimatedCost
+      );
+
+      return {
+        destination: normalizedDestination,
+        score: computePreferenceScore(normalizedDestination, preferences)
+      };
+    });
+
+    const defaultLimit = normalizedDays || 10;
+    const selected = budgetMode === "constrained"
+      ? knapsackOptimize(items, Math.floor(normalizedMaxBudget))
+      : items
+        .sort((a, b) => b.score - a.score)
+        .slice(0, defaultLimit);
+
+    const totalSelectedCost = selected.reduce(
+      (sum, item) => sum + normalizeNonNegativeInteger(item.destination.estimatedCost),
+      0
+    );
+    const totalScore = roundToTwo(
+      selected.reduce((sum, item) => sum + (Number(item.score) || 0), 0)
+    );
+    const remainingBudget = budgetMode === "constrained"
+      ? Math.max(0, normalizedMaxBudget - totalSelectedCost)
+      : null;
+    const utilizationPct = budgetMode === "constrained"
+      ? roundToTwo((totalSelectedCost / normalizedMaxBudget) * 100)
+      : null;
+
+    await logRecommendationEvent(req, {
+      severity: "Info",
+      event: "Budget optimized itinerary generated",
+      description: "User generated itinerary recommendations with budget optimization.",
+      status: "Success",
+      metadata: {
+        budgetMode,
+        days: normalizedDays,
+        selectedCount: selected.length
+      }
+    });
+
+    return res.status(200).json({
+      requestId: new mongoose.Types.ObjectId().toString(),
+      algorithmUsed: "knapsack",
+      modelVersion: ITINERARY_MODEL_VERSION,
+      budget: {
+        mode: budgetMode,
+        maxBudget: budgetMode === "constrained" ? normalizedMaxBudget : null,
+        totalSelectedCost,
+        remainingBudget,
+        utilizationPct
+      },
+      itinerary: {
+        destinations: selected.map((item) => ({
+          destination: item.destination,
+          score: roundToTwo(item.score)
+        })),
+        totalScore
+      },
+      warnings: []
+    });
+  } catch (err) {
+    console.error(err);
+    await logRecommendationEvent(req, {
+      severity: "Error",
+      event: "Budget optimized itinerary generation failed",
+      description: err.message,
+      status: "Failed"
+    });
+    return res.status(500).json({
+      error: {
+        code: "INTERNAL_ERROR",
+        message: "Server error",
+        details: {}
+      }
+    });
   }
 };
 

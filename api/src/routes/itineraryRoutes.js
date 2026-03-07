@@ -6,14 +6,14 @@ const {
   deleteUserItinerary
 } = require("../controllers/itineraryController");
 const {
-  generateItinerary: generateRecommendedItinerary
+  generateItineraryBudgetOptimized
 } = require("../controllers/recommendationController");
 
 const auth = require("../middleware/authMiddleware");
 
 router.post("/", auth, createItinerary);
 router.get("/", auth, getUserItineraries);
-router.post("/generate", auth, generateRecommendedItinerary);
+router.post("/generate", auth, generateItineraryBudgetOptimized);
 router.delete("/:id", auth, deleteUserItinerary);
 
 module.exports = router;
