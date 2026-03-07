@@ -92,6 +92,26 @@ function clampInteger(value, min, max, fallback = min) {
   return Math.min(max, Math.max(min, parsedValue));
 }
 
+function getDistancePriority(destination) {
+  const rawDistance = destination?.distancePriority
+    ?? destination?.distance
+    ?? destination?.distanceKm;
+  const numericDistance = Number(rawDistance);
+  return Number.isFinite(numericDistance) ? numericDistance : Number.POSITIVE_INFINITY;
+}
+
+function compareRankedItems(left, right) {
+  const scoreDiff = (Number(right?.score) || 0) - (Number(left?.score) || 0);
+  if (scoreDiff !== 0) return scoreDiff;
+
+  const distanceDiff = getDistancePriority(left?.destination) - getDistancePriority(right?.destination);
+  if (distanceDiff !== 0) return distanceDiff;
+
+  const leftId = left?.destination?._id?.toString?.() || "";
+  const rightId = right?.destination?._id?.toString?.() || "";
+  return leftId.localeCompare(rightId);
+}
+
 function roundToTwo(value) {
   return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
 }
@@ -635,6 +655,7 @@ exports.generateItinerary = async (req, res) => {
  */
 exports.generateItineraryBudgetOptimized = async (req, res) => {
   try {
+    const userId = req.user?.id;
     const {
       budgetMode,
       maxBudget,
@@ -744,12 +765,15 @@ exports.generateItineraryBudgetOptimized = async (req, res) => {
         score: computePreferenceScore(normalizedDestination, preferences)
       };
     });
+    const rankedCandidates = items.sort(compareRankedItems);
 
     let selected = [];
     const warnings = [];
+    let algorithmUsed = "score_sort";
 
     if (budgetMode === "constrained") {
-      selected = knapsackOptimize(items, Math.floor(normalizedMaxBudget));
+      selected = knapsackOptimize(rankedCandidates, Math.floor(normalizedMaxBudget));
+      algorithmUsed = "knapsack";
 
       if (selected.length < requestedLimit) {
         const selectedIds = new Set(
@@ -763,9 +787,9 @@ exports.generateItineraryBudgetOptimized = async (req, res) => {
           )
         );
 
-        const remainingCandidates = items
+        const remainingCandidates = rankedCandidates
           .filter((item) => !selectedIds.has(item.destination._id?.toString?.() || ""))
-          .sort((a, b) => b.score - a.score);
+          .sort(compareRankedItems);
 
         for (const candidate of remainingCandidates) {
           if (selected.length >= requestedLimit) break;
@@ -779,13 +803,16 @@ exports.generateItineraryBudgetOptimized = async (req, res) => {
 
         if (selected.length < requestedLimit) {
           warnings.push("NO_MORE_WITHIN_BUDGET");
+          warnings.push("BUDGET_CONSTRAINED");
+        } else {
+          algorithmUsed = "knapsack_plus_greedy_fill";
         }
       }
     } else {
-      selected = items
-        .sort((a, b) => b.score - a.score)
+      selected = rankedCandidates
         .slice(0, requestedLimit);
     }
+    selected.sort(compareRankedItems);
 
     const totalSelectedCost = selected.reduce(
       (sum, item) => sum + normalizeNonNegativeInteger(item.destination.estimatedCost),
@@ -800,6 +827,51 @@ exports.generateItineraryBudgetOptimized = async (req, res) => {
     const utilizationPct = budgetMode === "constrained"
       ? roundToTwo((totalSelectedCost / normalizedMaxBudget) * 100)
       : null;
+    const rankedSelection = selected.map((item, index) => ({
+      destination: item.destination,
+      score: roundToTwo(item.score),
+      rank: index + 1,
+      estimatedCost: normalizeNonNegativeInteger(item.destination.estimatedCost),
+      distancePriority: Number.isFinite(getDistancePriority(item.destination))
+        ? roundToTwo(getDistancePriority(item.destination))
+        : null
+    }));
+
+    const itineraryDestinations = rankedSelection.map((item) => ({
+      destination: item.destination,
+      cost: item.estimatedCost,
+      hybridScore: item.score,
+      rank: item.rank
+    }));
+    const { dayPlans } = await splitDestinationsByDays(itineraryDestinations, normalizedDays, userId);
+    const dayAssignments = dayPlans.map((day) => ({
+      dayNumber: day.dayNumber,
+      dayCost: roundToTwo(day.dayCost),
+      destinations: day.destinations.map((item) => ({
+        destination: item.destination,
+        score: roundToTwo(item.hybridScore || 0),
+        rank: item.rank || null,
+        estimatedCost: normalizeNonNegativeInteger(item.cost)
+      }))
+    }));
+    const assignedCount = dayAssignments.reduce(
+      (sum, day) => sum + day.destinations.length,
+      0
+    );
+    const emptyDays = normalizedDays
+      ? Math.max(0, normalizedDays - dayAssignments.filter((day) => day.destinations.length > 0).length)
+      : 0;
+    const unassignedCount = Math.max(0, rankedSelection.length - assignedCount);
+    const avgDestinationsPerDay = normalizedDays
+      ? roundToTwo(rankedSelection.length / normalizedDays)
+      : null;
+    const reasonCodes = [];
+    if (normalizedDays && requestedLimit < normalizedDays) {
+      reasonCodes.push("LIMIT_TOO_LOW");
+    }
+    if (budgetMode === "constrained" && rankedSelection.length < requestedLimit) {
+      reasonCodes.push("BUDGET_CONSTRAINED");
+    }
 
     await logRecommendationEvent(req, {
       severity: "Info",
@@ -816,8 +888,11 @@ exports.generateItineraryBudgetOptimized = async (req, res) => {
 
     return res.status(200).json({
       requestId: new mongoose.Types.ObjectId().toString(),
-      algorithmUsed: "knapsack",
+      algorithmUsed,
       modelVersion: ITINERARY_MODEL_VERSION,
+      pipelineVersion: "ranking-arrangement-v2",
+      arrangementVersion: "day-split-v1",
+      days: normalizedDays,
       budget: {
         mode: budgetMode,
         maxBudget: budgetMode === "constrained" ? normalizedMaxBudget : null,
@@ -826,13 +901,17 @@ exports.generateItineraryBudgetOptimized = async (req, res) => {
         utilizationPct
       },
       requestedLimit,
-      returnedCount: selected.length,
+      returnedCount: rankedSelection.length,
       itinerary: {
-        destinations: selected.map((item) => ({
-          destination: item.destination,
-          score: roundToTwo(item.score)
-        })),
+        destinations: rankedSelection,
+        dayAssignments,
         totalScore
+      },
+      arrangementDiagnostics: {
+        unassignedCount,
+        emptyDays,
+        avgDestinationsPerDay,
+        reasonCodes
       },
       warnings
     });
