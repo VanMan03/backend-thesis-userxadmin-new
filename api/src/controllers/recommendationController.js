@@ -85,6 +85,13 @@ function normalizeNonNegativeInteger(value) {
   return Math.max(0, Math.floor(numericValue));
 }
 
+function clampInteger(value, min, max, fallback = min) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) return fallback;
+  const parsedValue = Math.floor(numericValue);
+  return Math.min(max, Math.max(min, parsedValue));
+}
+
 function roundToTwo(value) {
   return Math.round((Number(value) + Number.EPSILON) * 100) / 100;
 }
@@ -632,6 +639,7 @@ exports.generateItineraryBudgetOptimized = async (req, res) => {
       budgetMode,
       maxBudget,
       days,
+      limit,
       mainInterests,
       subInterests,
       interestRanks,
@@ -710,6 +718,12 @@ exports.generateItineraryBudgetOptimized = async (req, res) => {
       normalizedMaxBudget = parsed;
     }
 
+    const requestedLimit = clampInteger(
+      limit || (normalizedDays ? normalizedDays * 2 : NaN),
+      1,
+      30
+    );
+
     const preferences = {
       mainInterests: normalizedMainInterests,
       subInterests: normalizedSubInterests,
@@ -731,12 +745,47 @@ exports.generateItineraryBudgetOptimized = async (req, res) => {
       };
     });
 
-    const defaultLimit = normalizedDays || 10;
-    const selected = budgetMode === "constrained"
-      ? knapsackOptimize(items, Math.floor(normalizedMaxBudget))
-      : items
+    let selected = [];
+    const warnings = [];
+
+    if (budgetMode === "constrained") {
+      selected = knapsackOptimize(items, Math.floor(normalizedMaxBudget));
+
+      if (selected.length < requestedLimit) {
+        const selectedIds = new Set(
+          selected.map((item) => item.destination._id?.toString?.() || "")
+        );
+        let remainingBudgetForFill = Math.max(
+          0,
+          normalizedMaxBudget - selected.reduce(
+            (sum, item) => sum + normalizeNonNegativeInteger(item.destination.estimatedCost),
+            0
+          )
+        );
+
+        const remainingCandidates = items
+          .filter((item) => !selectedIds.has(item.destination._id?.toString?.() || ""))
+          .sort((a, b) => b.score - a.score);
+
+        for (const candidate of remainingCandidates) {
+          if (selected.length >= requestedLimit) break;
+
+          const estimatedCost = normalizeNonNegativeInteger(candidate.destination.estimatedCost);
+          if (estimatedCost <= remainingBudgetForFill) {
+            selected.push(candidate);
+            remainingBudgetForFill -= estimatedCost;
+          }
+        }
+
+        if (selected.length < requestedLimit) {
+          warnings.push("NO_MORE_WITHIN_BUDGET");
+        }
+      }
+    } else {
+      selected = items
         .sort((a, b) => b.score - a.score)
-        .slice(0, defaultLimit);
+        .slice(0, requestedLimit);
+    }
 
     const totalSelectedCost = selected.reduce(
       (sum, item) => sum + normalizeNonNegativeInteger(item.destination.estimatedCost),
@@ -760,6 +809,7 @@ exports.generateItineraryBudgetOptimized = async (req, res) => {
       metadata: {
         budgetMode,
         days: normalizedDays,
+        requestedLimit,
         selectedCount: selected.length
       }
     });
@@ -775,6 +825,8 @@ exports.generateItineraryBudgetOptimized = async (req, res) => {
         remainingBudget,
         utilizationPct
       },
+      requestedLimit,
+      returnedCount: selected.length,
       itinerary: {
         destinations: selected.map((item) => ({
           destination: item.destination,
@@ -782,7 +834,7 @@ exports.generateItineraryBudgetOptimized = async (req, res) => {
         })),
         totalScore
       },
-      warnings: []
+      warnings
     });
   } catch (err) {
     console.error(err);
