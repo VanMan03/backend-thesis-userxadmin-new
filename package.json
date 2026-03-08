@@ -4,7 +4,9 @@
   "main": "index.js",
   "scripts": {
     "test": "node --test",
-    "start": "node api/index.js"
+    "start": "node api/index.js",
+    "migrate:duration-hours:dry-run": "node api/scripts/backfillDurationHours.js",
+    "migrate:duration-hours": "node api/scripts/backfillDurationHours.js --apply"
   },
   "engines": {
     "npm": ">=9"

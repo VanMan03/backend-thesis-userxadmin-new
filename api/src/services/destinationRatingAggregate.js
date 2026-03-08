@@ -1,6 +1,7 @@
 const mongoose = require("mongoose");
 const Destination = require("../models/Destination");
 const Rating = require("../models/Rating");
+const { applyDurationHoursCompatibility } = require("../utils/durationHours");
 
 function normalizeAggregate(result) {
   const reviewCount = Number(result?.reviewCount || 0);
@@ -92,10 +93,11 @@ async function clearUserRatingAndAggregate({ userId, destinationId }) {
 
 function withDestinationAggregate(destination) {
   if (!destination || typeof destination !== "object") return destination;
+  const withDurationHours = applyDurationHoursCompatibility(destination);
   return {
-    ...destination,
-    rating: Number.isFinite(destination.rating) ? destination.rating : 0,
-    reviewCount: Number.isFinite(destination.reviewCount) ? destination.reviewCount : 0
+    ...withDurationHours,
+    rating: Number.isFinite(withDurationHours.rating) ? withDurationHours.rating : 0,
+    reviewCount: Number.isFinite(withDurationHours.reviewCount) ? withDurationHours.reviewCount : 0
   };
 }
 

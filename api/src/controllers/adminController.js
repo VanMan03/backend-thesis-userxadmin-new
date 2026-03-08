@@ -30,6 +30,7 @@ const {
   getRouteSummary,
   reverseGeocode
 } = require("../services/mapboxService");
+const { parseDurationHoursFromPayload } = require("../utils/durationHours");
 
 const TAXONOMY_KEY = "default";
 const allowedLogStatuses = new Set(["Success", "Warning", "Failed"]);
@@ -573,6 +574,7 @@ exports.createDestination = async (req, res) => {
       subInterests,
       estimatedCost
     } = req.body;
+    const durationInput = parseDurationHoursFromPayload(req.body);
 
     const coordinateInput = resolveCoordinateInput(req.body);
     const parsedLatitude = coordinateInput.latitude;
@@ -643,6 +645,7 @@ exports.createDestination = async (req, res) => {
       mainInterests: normalizedInterestData.mainInterests,
       subInterests: normalizedInterestData.subInterests,
       estimatedCost,
+      durationHours: durationInput.value,
       location: {
         lat: parsedLatitude,
         lng: parsedLongitude,
@@ -668,6 +671,10 @@ exports.createDestination = async (req, res) => {
     if (err.status === 400) {
       return res.status(400).json({ message: err.message });
     }
+    if (err?.name === "ValidationError") {
+      const firstMessage = Object.values(err.errors || {})[0]?.message || "Validation failed";
+      return res.status(400).json({ message: firstMessage });
+    }
     console.error("Create destination error:", err);
     await logAdminAction(req, {
       severity: "Error",
@@ -685,6 +692,13 @@ exports.updateDestination = async (req, res) => {
   try {
     const updates = { ...req.body };
     const addressInput = extractAddressInput(updates);
+    const durationInput = parseDurationHoursFromPayload(updates);
+
+    if (durationInput.hasAnyDurationInput) {
+      updates.durationHours = durationInput.value;
+      delete updates.estimatedDuration;
+      delete updates.duration;
+    }
 
     const coordinateInput = resolveCoordinateInput(updates);
 
@@ -820,6 +834,10 @@ exports.updateDestination = async (req, res) => {
   } catch (err) {
     if (err.status === 400) {
       return res.status(400).json({ message: err.message });
+    }
+    if (err?.name === "ValidationError") {
+      const firstMessage = Object.values(err.errors || {})[0]?.message || "Validation failed";
+      return res.status(400).json({ message: firstMessage });
     }
     console.error(err);
     await logAdminAction(req, {

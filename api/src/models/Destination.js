@@ -39,6 +39,11 @@ const DestinationSchema = new mongoose.Schema(
   min: 0,
   default: 0
   },
+  durationHours: {
+    type: Number,
+    min: 0.5,
+    max: 12
+  },
 
     location: {
       lat: {
