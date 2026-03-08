@@ -5,6 +5,7 @@ const {
   createDestination,
   getAllDestinationsAdmin,
   updateDestination,
+  backfillDestinationInterests,
   deleteDestination,
   uploadDestinationImage,
   deleteDestinationImage,
@@ -39,6 +40,7 @@ router.post(
 );
 
 router.put("/destinations/:id", auth, role("admin"), updateDestination);
+router.post("/destinations/backfill-interests", auth, role("admin"), backfillDestinationInterests);
 router.delete("/destinations/:id", auth, role("admin"), deleteDestination);
 router.get("/destinations", auth, role("admin"), getAllDestinationsAdmin);
 

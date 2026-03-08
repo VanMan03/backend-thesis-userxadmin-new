@@ -283,6 +283,18 @@ function normalizeDestinationInterests({
   };
 }
 
+function toIdArray(values) {
+  if (!Array.isArray(values)) return [];
+  return values
+    .map((value) => value?.toString().trim())
+    .filter(Boolean);
+}
+
+function sameStringArray(left = [], right = []) {
+  if (left.length !== right.length) return false;
+  return left.every((value, index) => value === right[index]);
+}
+
 exports.getDestinationTaxonomy = async (_req, res) => {
   try {
     const taxonomy = await getOrCreateTaxonomyDoc();
@@ -848,6 +860,87 @@ exports.updateDestination = async (req, res) => {
       metadata: { destinationId: req.params.id }
     });
     res.status(500).json({ message: "Server error" });
+  }
+};
+
+exports.backfillDestinationInterests = async (req, res) => {
+  try {
+    const includeInactive = req.body?.includeInactive === true;
+    const dryRun = req.body?.dryRun !== false;
+    const query = includeInactive ? {} : { isActive: true };
+
+    const destinations = await Destination.find(query).select(
+      "_id name category features mainInterests subInterests isActive"
+    );
+
+    const bulkOps = [];
+    const changed = [];
+
+    destinations.forEach((destination) => {
+      const inferred = legacyToCanonicalSelection({
+        categories: destination.category,
+        features: destination.features
+      });
+
+      const normalizedMain = normalizeMainInterestIds(destination.mainInterests);
+      const normalizedSub = normalizeSubInterestIds(destination.subInterests);
+
+      const canonicalMain = normalizedMain.length
+        ? normalizedMain
+        : inferred.mainInterests;
+      const canonicalSub = normalizedSub.length
+        ? normalizedSub
+        : inferred.subInterests;
+
+      const storedMain = toIdArray(destination.mainInterests);
+      const storedSub = toIdArray(destination.subInterests);
+
+      const mainChanged = !sameStringArray(storedMain, canonicalMain);
+      const subChanged = !sameStringArray(storedSub, canonicalSub);
+      if (!mainChanged && !subChanged) return;
+
+      changed.push({
+        destinationId: destination._id.toString(),
+        name: destination.name || null,
+        isActive: destination.isActive !== false,
+        before: {
+          mainInterests: storedMain,
+          subInterests: storedSub
+        },
+        after: {
+          mainInterests: canonicalMain,
+          subInterests: canonicalSub
+        }
+      });
+
+      bulkOps.push({
+        updateOne: {
+          filter: { _id: destination._id },
+          update: {
+            $set: {
+              mainInterests: canonicalMain,
+              subInterests: canonicalSub
+            }
+          }
+        }
+      });
+    });
+
+    if (!dryRun && bulkOps.length) {
+      await Destination.bulkWrite(bulkOps, { ordered: false });
+    }
+
+    return res.status(200).json({
+      dryRun,
+      includeInactive,
+      scannedCount: destinations.length,
+      updateCount: changed.length,
+      updatedIds: changed.map((item) => item.destinationId),
+      sample: changed.slice(0, 20)
+    });
+  } catch (err) {
+    console.error("Backfill destination interests error:", err);
+    return res.status(500).json({ message: "Server error" });
   }
 };
 

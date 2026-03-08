@@ -7,6 +7,10 @@ const mongoose = require("mongoose");
 const { getDefaultValidFeatures, sanitizeValidFeatures } = require("../utils/normalizeFeatures");
 const { buildInterestsSchema } = require("../utils/interestsSchema");
 const {
+  MAIN_INTERESTS,
+  SUB_INTERESTS
+} = require("../shared/interests");
+const {
   upsertUserRatingAndAggregate,
   clearUserRatingAndAggregate,
   withDestinationAggregate
@@ -50,8 +54,32 @@ async function toLeanResult(queryOrValue) {
   return queryOrValue;
 }
 
+function buildCanonicalInterestsSchema() {
+  const subByMainId = new Map();
+
+  SUB_INTERESTS.forEach((subInterest) => {
+    if (!subByMainId.has(subInterest.mainInterestId)) {
+      subByMainId.set(subInterest.mainInterestId, []);
+    }
+
+    subByMainId.get(subInterest.mainInterestId).push({
+      id: subInterest.id,
+      label: subInterest.label
+    });
+  });
+
+  return {
+    mainInterests: MAIN_INTERESTS.map((mainInterest) => ({
+      id: mainInterest.id,
+      label: mainInterest.label,
+      subInterests: subByMainId.get(mainInterest.id) || []
+    }))
+  };
+}
+
 exports.getInterestsSchema = async (_req, res) => {
   try {
+    const canonicalSchema = buildCanonicalInterestsSchema();
     const canonicalValidFeatures = getDefaultValidFeatures();
 
     if (!Object.keys(canonicalValidFeatures).length) {
@@ -75,7 +103,14 @@ exports.getInterestsSchema = async (_req, res) => {
     });
 
     res.set("Cache-Control", "no-store");
-    res.status(200).json(schema);
+    res.status(200).json({
+      ...canonicalSchema,
+      source: "canonical",
+      diagnostics: {
+        runtimeCategoryCount: schema.mainInterests.length,
+        activeDestinationCount: Array.isArray(destinations) ? destinations.length : 0
+      }
+    });
   } catch (err) {
     console.error("Get interests schema error:", err);
     res.status(500).json({ message: "Server error" });
