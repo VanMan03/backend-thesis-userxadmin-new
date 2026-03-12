@@ -8,6 +8,7 @@ const Rating = require("../models/Rating");
 const RecommendationFeedback = require("../models/RecommendationFeedback");
 const DestinationComment = require("../models/DestinationComment");
 const mongoose = require("mongoose");
+const bcrypt = require("bcryptjs");
 const {
   normalizeFeatures,
   normalizeCategories,
@@ -176,6 +177,18 @@ function parseOptionalObjectId(value) {
   return trimmed;
 }
 
+function toAdminDto(user) {
+  if (!user) return null;
+  return {
+    id: user._id?.toString(),
+    fullName: user.fullName,
+    email: user.email,
+    role: user.role,
+    createdAt: user.createdAt,
+    updatedAt: user.updatedAt
+  };
+}
+
 async function logAdminAction(req, payload) {
   await createSystemLog({
     ...payload,
@@ -282,6 +295,213 @@ function normalizeDestinationInterests({
       : inferredCanonical.subInterests
   };
 }
+
+exports.getAdminProfile = async (req, res) => {
+  try {
+    const admin = await User.findById(req.user.id).select("-password");
+    if (!admin) {
+      return res.status(404).json({ message: "Admin not found" });
+    }
+
+    await logAdminAction(req, {
+      severity: "Info",
+      event: "Admin profile retrieved",
+      description: `Admin ${admin.email} retrieved profile.`,
+      status: "Success"
+    });
+
+    return res.json({
+      message: "Admin profile retrieved",
+      data: { admin: toAdminDto(admin) }
+    });
+  } catch (err) {
+    console.error("Admin profile fetch error:", err);
+    await logAdminAction(req, {
+      severity: "Error",
+      event: "Admin profile fetch failed",
+      description: err.message,
+      status: "Failed"
+    });
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+exports.updateAdminProfile = async (req, res) => {
+  try {
+    const { fullName, email } = req.body || {};
+    const nextFullName = typeof fullName === "string" ? fullName.trim() : undefined;
+    const nextEmail = typeof email === "string" ? email.trim() : undefined;
+
+    if (!nextFullName && !nextEmail) {
+      return res.status(400).json({ message: "fullName or email is required" });
+    }
+
+    if (nextEmail) {
+      const existing = await User.findOne({
+        email: nextEmail,
+        _id: { $ne: req.user.id }
+      });
+      if (existing) {
+        return res.status(409).json({ message: "Email already exists" });
+      }
+    }
+
+    const updates = {};
+    if (nextFullName) updates.fullName = nextFullName;
+    if (nextEmail) updates.email = nextEmail;
+
+    const admin = await User.findByIdAndUpdate(
+      req.user.id,
+      { $set: updates },
+      { new: true }
+    ).select("-password");
+
+    if (!admin) {
+      return res.status(404).json({ message: "Admin not found" });
+    }
+
+    await logAdminAction(req, {
+      severity: "Info",
+      event: "Admin profile updated",
+      description: `Admin ${admin.email} updated profile.`,
+      status: "Success"
+    });
+
+    return res.json({
+      message: "Admin profile updated",
+      data: { admin: toAdminDto(admin) }
+    });
+  } catch (err) {
+    console.error("Admin profile update error:", err);
+    await logAdminAction(req, {
+      severity: "Error",
+      event: "Admin profile update failed",
+      description: err.message,
+      status: "Failed"
+    });
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+exports.changeAdminPassword = async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body || {};
+
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ message: "currentPassword and newPassword are required" });
+    }
+
+    const admin = await User.findById(req.user.id);
+    if (!admin) {
+      return res.status(404).json({ message: "Admin not found" });
+    }
+
+    const isMatch = await bcrypt.compare(currentPassword, admin.password);
+    if (!isMatch) {
+      return res.status(400).json({ message: "Current password is incorrect" });
+    }
+
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    admin.password = hashedPassword;
+    await admin.save();
+
+    await logAdminAction(req, {
+      severity: "Info",
+      event: "Admin password updated",
+      description: `Admin ${admin.email} updated password.`,
+      status: "Success"
+    });
+
+    return res.json({ message: "Password updated successfully" });
+  } catch (err) {
+    console.error("Admin password update error:", err);
+    await logAdminAction(req, {
+      severity: "Error",
+      event: "Admin password update failed",
+      description: err.message,
+      status: "Failed"
+    });
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+exports.getAllAdmins = async (req, res) => {
+  try {
+    const admins = await User.find({ role: "admin" }).select("-password");
+
+    await logAdminAction(req, {
+      severity: "Info",
+      event: "Admins listed",
+      description: `Admin retrieved ${admins.length} admins.`,
+      status: "Success"
+    });
+
+    return res.json({
+      message: "Admins retrieved",
+      data: { admins: admins.map(toAdminDto) }
+    });
+  } catch (err) {
+    console.error("Admin list fetch error:", err);
+    await logAdminAction(req, {
+      severity: "Error",
+      event: "Admin list fetch failed",
+      description: err.message,
+      status: "Failed"
+    });
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+exports.createAdmin = async (req, res) => {
+  try {
+    const { fullName, email, password, role } = req.body || {};
+    const nextFullName = typeof fullName === "string" ? fullName.trim() : "";
+    const nextEmail = typeof email === "string" ? email.trim() : "";
+    const nextRole = role || "admin";
+
+    if (!nextFullName || !nextEmail || !password) {
+      return res.status(400).json({ message: "fullName, email, and password are required" });
+    }
+
+    if (nextRole !== "admin") {
+      return res.status(400).json({ message: "role must be admin" });
+    }
+
+    const existingUser = await User.findOne({ email: nextEmail });
+    if (existingUser) {
+      return res.status(409).json({ message: "Email already exists" });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const admin = await User.create({
+      fullName: nextFullName,
+      email: nextEmail,
+      password: hashedPassword,
+      role: "admin"
+    });
+
+    await logAdminAction(req, {
+      severity: "Info",
+      event: "Admin created",
+      description: `Admin created ${admin.email}.`,
+      status: "Success"
+    });
+
+    return res.status(201).json({
+      message: "Admin created",
+      data: { admin: toAdminDto(admin) }
+    });
+  } catch (err) {
+    console.error("Admin create error:", err);
+    await logAdminAction(req, {
+      severity: "Error",
+      event: "Admin create failed",
+      description: err.message,
+      status: "Failed"
+    });
+    return res.status(500).json({ message: "Server error" });
+  }
+};
 
 function toIdArray(values) {
   if (!Array.isArray(values)) return [];
