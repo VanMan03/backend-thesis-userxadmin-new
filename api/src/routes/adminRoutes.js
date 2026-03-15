@@ -9,6 +9,11 @@ const {
   deleteDestination,
   uploadDestinationImage,
   deleteDestinationImage,
+  getAdminProfile,
+  updateAdminProfile,
+  changeAdminPassword,
+  getAllAdmins,
+  createAdmin,
   getAllUsers,
   getAllItineraries,
   getSystemLogs,
@@ -32,6 +37,13 @@ const {
 
 const auth = require("../middleware/authMiddleware");
 const role = require("../middleware/roleMiddleware");
+
+router.get("/profile", auth, role("admin"), getAdminProfile);
+router.put("/profile", auth, role("admin"), updateAdminProfile);
+router.patch("/profile", auth, role("admin"), updateAdminProfile);
+router.post("/password", auth, role("admin"), changeAdminPassword);
+router.get("/admins", auth, role("admin"), getAllAdmins);
+router.post("/admins", auth, role("admin"), createAdmin);
 
 router.post(
   "/destinations",
