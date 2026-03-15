@@ -1,5 +1,8 @@
 // Handles itinerary creation and retrieval for users
 const Itinerary = require("../models/Itinerary");
+const CollaborationNotification = require("../models/CollaborationNotification");
+const Destination = require("../models/Destination");
+const User = require("../models/User");
 const mongoose = require("mongoose");
 const {
   normalizeDays,
@@ -12,6 +15,7 @@ const {
   normalizeCollaborators
 } = require("../utils/collaboratorUtils");
 const { createSystemLog } = require("../services/systemLogService");
+const { broadcastItineraryEdit } = require("../services/collaborationRealtime");
 
 async function logItineraryEvent(req, payload) {
   await createSystemLog({
@@ -205,6 +209,150 @@ exports.deleteUserItinerary = async (req, res) => {
       metadata: { itineraryId: req.params.id }
     });
     res.status(500).json({ message: "Server error" });
+  }
+};
+
+exports.updateItinerary = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.id;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      await logItineraryEvent(req, {
+        severity: "Warning",
+        event: "Itinerary validation failed",
+        description: "Invalid itinerary ID",
+        status: "Failed",
+        metadata: { itineraryId: id }
+      });
+      return res.status(400).json({ message: "Invalid itinerary ID" });
+    }
+
+    const itinerary = await Itinerary.findOne({
+      _id: id,
+      $or: [{ user: userId }, { collaboratorIds: userId }]
+    });
+
+    if (!itinerary) {
+      await logItineraryEvent(req, {
+        severity: "Warning",
+        event: "Itinerary update failed",
+        description: "Itinerary not found or access denied",
+        status: "Failed",
+        metadata: { itineraryId: id }
+      });
+      return res.status(404).json({ message: "Itinerary not found" });
+    }
+
+    const edit = {};
+    const {
+      name,
+      tripDays,
+      days,
+      destinationIds,
+      destinations
+    } = req.body;
+
+    if (typeof name === "string") {
+      itinerary.name = name.trim() || null;
+      edit.name = itinerary.name;
+    }
+
+    const daysInput = tripDays !== undefined ? tripDays : days;
+    const normalizedDays = daysInput !== undefined ? normalizeDays(daysInput) : itinerary.days;
+    if (daysInput !== undefined && normalizedDays === null) {
+      return res.status(400).json({ message: "days must be a positive integer" });
+    }
+    if (daysInput !== undefined) {
+      itinerary.days = normalizedDays;
+      edit.tripDays = normalizedDays;
+    }
+
+    let resolvedDestinationIds = destinationIds;
+    if (resolvedDestinationIds === undefined && Array.isArray(destinations)) {
+      resolvedDestinationIds = destinations
+        .map((item) => item?.destination?._id || item?.destination || item?.destinationId || item?._id)
+        .filter(Boolean);
+    }
+
+    if (resolvedDestinationIds !== undefined) {
+      if (!Array.isArray(resolvedDestinationIds)) {
+        return res.status(400).json({ message: "destinationIds must be an array" });
+      }
+
+      const cleanedIds = [...new Set(resolvedDestinationIds.map((value) => value?.toString()).filter(Boolean))];
+      const validIds = cleanedIds.filter((value) => mongoose.Types.ObjectId.isValid(value));
+      if (cleanedIds.length !== validIds.length) {
+        return res.status(400).json({ message: "destinationIds contains invalid IDs" });
+      }
+
+      const destinationDocs = await Destination.find({
+        _id: { $in: validIds },
+        isActive: true
+      }).select("_id estimatedCost");
+
+      const destinationMap = new Map(destinationDocs.map((d) => [d._id.toString(), d]));
+      const itineraryDestinations = validIds
+        .filter((destId) => destinationMap.has(destId))
+        .map((destId) => ({
+          destination: destId,
+          cost: destinationMap.get(destId).estimatedCost || 0
+        }));
+
+      itinerary.destinations = itineraryDestinations;
+      itinerary.totalCost = itineraryDestinations.reduce((sum, item) => sum + (item.cost || 0), 0);
+      edit.destinationIds = itineraryDestinations.map((item) => item.destination.toString());
+    }
+
+    const { dayPlans } = splitDestinationsByDays(itinerary.destinations, itinerary.days);
+    itinerary.dayPlans = dayPlans;
+    await itinerary.save();
+
+    await logItineraryEvent(req, {
+      severity: "Success",
+      event: "Itinerary updated",
+      description: "User updated itinerary.",
+      status: "Success",
+      metadata: { itineraryId: itinerary._id.toString() }
+    });
+
+    const actor = await User.findById(req.user.id).select("_id fullName");
+    const participantIds = [itinerary.user, ...(itinerary.collaboratorIds || [])]
+      .map((value) => value.toString())
+      .filter((value) => value !== req.user.id.toString());
+
+    if (participantIds.length) {
+      await CollaborationNotification.insertMany(
+        participantIds.map((participantId) => ({
+          user: participantId,
+          actor: req.user.id,
+          type: "itinerary_updated",
+          title: "Itinerary updated",
+          message: `${actor?.fullName || "A collaborator"} updated a shared itinerary`,
+          itineraryId: itinerary._id
+        }))
+      );
+    }
+
+    broadcastItineraryEdit({
+      itineraryId: itinerary._id,
+      actorId: req.user.id,
+      actorName: actor?.fullName || null,
+      edit,
+      updatedAt: itinerary.updatedAt?.toISOString() || new Date().toISOString()
+    });
+
+    return res.json(itinerary);
+  } catch (err) {
+    console.error(err);
+    await logItineraryEvent(req, {
+      severity: "Error",
+      event: "Itinerary update failed",
+      description: err.message,
+      status: "Failed",
+      metadata: { itineraryId: req.params.id }
+    });
+    return res.status(500).json({ message: "Server error" });
   }
 };
 
