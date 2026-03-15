@@ -1190,6 +1190,66 @@ exports.getRatingsSummary = async (req, res) => {
   }
 };
 
+exports.getRatings = async (req, res) => {
+  try {
+    const destinationId = parseOptionalObjectId(req.query.destinationId);
+    const from = parseDateInput(req.query.from);
+    const to = parseDateInput(req.query.to);
+    const page = parsePositiveInt(req.query.page, 1);
+    const limit = Math.min(parsePositiveInt(req.query.limit, 50), 200);
+
+    if (req.query.destinationId && destinationId === undefined) {
+      return res.status(400).json({ message: "Invalid destinationId" });
+    }
+    if (req.query.from && !from) {
+      return res.status(400).json({ message: "Invalid from date" });
+    }
+    if (req.query.to && !to) {
+      return res.status(400).json({ message: "Invalid to date" });
+    }
+
+    const query = {};
+    if (destinationId) query.destination = destinationId;
+    if (from || to) {
+      query.updatedAt = {};
+      if (from) query.updatedAt.$gte = from;
+      if (to) query.updatedAt.$lte = to;
+    }
+
+    const skip = (page - 1) * limit;
+    const [ratings, total] = await Promise.all([
+      Rating.find(query)
+        .sort({ updatedAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .populate("destination", "name")
+        .populate("user", "fullName email")
+        .lean(),
+      Rating.countDocuments(query)
+    ]);
+
+    return res.json({
+      ratings: ratings.map((entry) => ({
+        id: entry._id.toString(),
+        destinationId: entry.destination?._id?.toString() || null,
+        destinationName: entry.destination?.name || null,
+        userId: entry.user?._id?.toString() || null,
+        userName: entry.user?.fullName || null,
+        userEmail: entry.user?.email || null,
+        rating: entry.rating,
+        updatedAt: entry.updatedAt
+      })),
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit) || 1
+    });
+  } catch (err) {
+    console.error("Get ratings error:", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
 exports.getRatingsByDestination = async (req, res) => {
   try {
     const destinationId = req.params.id;

@@ -22,6 +22,7 @@ const {
   updateDestinationFeature,
   deleteDestinationFeature,
   getCloudinaryUploadSignature,
+  getRatings,
   getRatingsSummary,
   getRatingsByDestination,
   getFeedbackEvents,
@@ -56,6 +57,7 @@ router.delete("/destination-taxonomy/categories/:category/features/:feature", au
 router.get("/users", auth, role("admin"), getAllUsers);
 router.get("/itineraries", auth, role("admin"), getAllItineraries);
 router.get("/logs", auth, role("admin"), getSystemLogs);
+router.get("/ratings", auth, role("admin"), getRatings);
 router.get("/ratings/summary", auth, role("admin"), getRatingsSummary);
 router.get("/ratings/destination/:id", auth, role("admin"), getRatingsByDestination);
 router.get("/feedback/events", auth, role("admin"), getFeedbackEvents);
