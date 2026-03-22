@@ -41,6 +41,32 @@ function parseCoordinate(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function parseNonNegativeNumber(value, label, { required = false } = {}) {
+  if (value === undefined || value === null) {
+    if (required) {
+      const err = new Error(`${label} is required`);
+      err.status = 400;
+      throw err;
+    }
+    return undefined;
+  }
+
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    const err = new Error(`${label} must be a valid number`);
+    err.status = 400;
+    throw err;
+  }
+
+  if (parsed < 0) {
+    const err = new Error(`${label} must be a non-negative number`);
+    err.status = 400;
+    throw err;
+  }
+
+  return parsed;
+}
+
 function hasOwn(source, key) {
   return Object.prototype.hasOwnProperty.call(source, key);
 }
@@ -807,6 +833,9 @@ exports.createDestination = async (req, res) => {
       estimatedCost
     } = req.body;
     const durationInput = parseDurationHoursFromPayload(req.body);
+    const normalizedEstimatedCost = parseNonNegativeNumber(estimatedCost, "estimatedCost", {
+      required: true
+    });
 
     const coordinateInput = resolveCoordinateInput(req.body);
     const parsedLatitude = coordinateInput.latitude;
@@ -876,7 +905,7 @@ exports.createDestination = async (req, res) => {
       features: normalizedFeatures,
       mainInterests: normalizedInterestData.mainInterests,
       subInterests: normalizedInterestData.subInterests,
-      estimatedCost,
+      estimatedCost: normalizedEstimatedCost,
       durationHours: durationInput.value,
       location: {
         lat: parsedLatitude,
@@ -907,6 +936,9 @@ exports.createDestination = async (req, res) => {
       const firstMessage = Object.values(err.errors || {})[0]?.message || "Validation failed";
       return res.status(400).json({ message: firstMessage });
     }
+    if (err?.name === "CastError") {
+      return res.status(400).json({ message: `${err.path} is invalid` });
+    }
     console.error("Create destination error:", err);
     await logAdminAction(req, {
       severity: "Error",
@@ -925,6 +957,13 @@ exports.updateDestination = async (req, res) => {
     const updates = { ...req.body };
     const addressInput = extractAddressInput(updates);
     const durationInput = parseDurationHoursFromPayload(updates);
+
+    if (Object.prototype.hasOwnProperty.call(updates, "estimatedCost")) {
+      updates.estimatedCost = parseNonNegativeNumber(
+        updates.estimatedCost,
+        "estimatedCost"
+      );
+    }
 
     if (durationInput.hasAnyDurationInput) {
       updates.durationHours = durationInput.value;
@@ -1070,6 +1109,9 @@ exports.updateDestination = async (req, res) => {
     if (err?.name === "ValidationError") {
       const firstMessage = Object.values(err.errors || {})[0]?.message || "Validation failed";
       return res.status(400).json({ message: firstMessage });
+    }
+    if (err?.name === "CastError") {
+      return res.status(400).json({ message: `${err.path} is invalid` });
     }
     console.error(err);
     await logAdminAction(req, {
