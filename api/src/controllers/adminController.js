@@ -71,6 +71,14 @@ function hasOwn(source, key) {
   return Object.prototype.hasOwnProperty.call(source, key);
 }
 
+function buildAdminErrorDetails(err) {
+  if (!err || typeof err !== "object") return null;
+  return {
+    name: err.name || "Error",
+    message: err.message || "Unknown error"
+  };
+}
+
 function resolveCoordinateInput(payload = {}) {
   const location = payload?.location && typeof payload.location === "object"
     ? payload.location
@@ -947,7 +955,8 @@ exports.createDestination = async (req, res) => {
       status: "Failed",
       metadata: { body: req.body }
     });
-    res.status(500).json({ message: "Server error" });
+    const details = buildAdminErrorDetails(err);
+    res.status(500).json({ message: "Server error", details });
   }
 };
 
@@ -1121,7 +1130,8 @@ exports.updateDestination = async (req, res) => {
       status: "Failed",
       metadata: { destinationId: req.params.id }
     });
-    res.status(500).json({ message: "Server error" });
+    const details = buildAdminErrorDetails(err);
+    res.status(500).json({ message: "Server error", details });
   }
 };
 
