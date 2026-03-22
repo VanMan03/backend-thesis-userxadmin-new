@@ -120,7 +120,7 @@ DestinationSchema.path("images").validate(function (val) {
   return val.length <= 4;
 }, "Maximum of 4 images allowed");
 
-DestinationSchema.pre("validate", function syncLocationCoordinateKeys(next) {
+DestinationSchema.pre("validate", function syncLocationCoordinateKeys() {
   if (this.location && typeof this.location === "object") {
     if (Number.isFinite(this.location.lat) && !Number.isFinite(this.location.latitude)) {
       this.location.latitude = this.location.lat;
@@ -135,7 +135,6 @@ DestinationSchema.pre("validate", function syncLocationCoordinateKeys(next) {
       this.location.lng = this.location.longitude;
     }
   }
-  next();
 });
 
 module.exports = mongoose.model("Destination", DestinationSchema);
