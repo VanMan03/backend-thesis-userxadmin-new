@@ -75,7 +75,8 @@ function buildAdminErrorDetails(err) {
   if (!err || typeof err !== "object") return null;
   return {
     name: err.name || "Error",
-    message: err.message || "Unknown error"
+    message: err.message || "Unknown error",
+    stack: err.stack || null
   };
 }
 
