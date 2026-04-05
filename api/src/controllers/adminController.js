@@ -23,6 +23,9 @@ const {
   legacyToCanonicalSelection
 } = require("../shared/interests");
 const {
+  normalizeLocationScope
+} = require("../shared/locationScopes");
+const {
   createSystemLog,
   allowedSeverities
 } = require("../services/systemLogService");
@@ -839,8 +842,10 @@ exports.createDestination = async (req, res) => {
       features,
       mainInterests,
       subInterests,
-      estimatedCost
+      estimatedCost,
+      locationScope
     } = req.body;
+    const normalizedLocationScope = normalizeLocationScope(locationScope);
     const durationInput = parseDurationHoursFromPayload(req.body);
     const normalizedEstimatedCost = parseNonNegativeNumber(estimatedCost, "estimatedCost", {
       required: true
@@ -916,6 +921,7 @@ exports.createDestination = async (req, res) => {
       subInterests: normalizedInterestData.subInterests,
       estimatedCost: normalizedEstimatedCost,
       durationHours: durationInput.value,
+      ...(normalizedLocationScope !== undefined ? { locationScope: normalizedLocationScope } : {}),
       location: {
         lat: parsedLatitude,
         lng: parsedLongitude,
@@ -967,6 +973,13 @@ exports.updateDestination = async (req, res) => {
     const updates = { ...req.body };
     const addressInput = extractAddressInput(updates);
     const durationInput = parseDurationHoursFromPayload(updates);
+
+    if (Object.prototype.hasOwnProperty.call(updates, "locationScope")) {
+      updates.locationScope = normalizeLocationScope(
+        updates.locationScope,
+        { required: true }
+      );
+    }
 
     if (Object.prototype.hasOwnProperty.call(updates, "estimatedCost")) {
       updates.estimatedCost = parseNonNegativeNumber(

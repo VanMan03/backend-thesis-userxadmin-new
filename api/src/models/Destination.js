@@ -3,10 +3,21 @@ const {
   MAIN_INTEREST_IDS,
   SUB_INTEREST_IDS
 } = require("../shared/interests");
+const {
+  LOCATION_SCOPES,
+  DEFAULT_LOCATION_SCOPE
+} = require("../shared/locationScopes");
 const DestinationSchema = new mongoose.Schema(
   {
     name: String,
     description: String,
+
+    locationScope: {
+      type: String,
+      enum: LOCATION_SCOPES,
+      default: DEFAULT_LOCATION_SCOPE
+    },
+
 
     category: {
       type: [String],
