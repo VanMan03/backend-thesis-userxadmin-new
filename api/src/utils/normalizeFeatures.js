@@ -155,6 +155,63 @@ function normalizeFeatureObjectForCategory(category, selectedForCategory, validF
   return result;
 }
 
+function mapFlatFeaturesToCategories(categories, selectedFeatures, validFeaturesByCategory) {
+  const features = {};
+  if (!categories.length) return features;
+
+  const rawList = Array.isArray(selectedFeatures)
+    ? selectedFeatures
+    : Object.entries(selectedFeatures || {})
+      .filter(([, value]) => Boolean(value))
+      .map(([key]) => key);
+
+  const list = rawList
+    .filter((item) => typeof item === "string")
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  if (!list.length) return features;
+
+  const categoryMeta = categories.map((category) => {
+    const valid = validFeaturesByCategory[category] || [];
+    return {
+      category,
+      validSet: new Set(valid),
+      keyToLabel: new Map(valid.map((label) => [toFeatureKey(label), label]))
+    };
+  });
+
+  const selections = Object.fromEntries(categories.map((category) => [category, []]));
+
+  list.forEach((rawFeature) => {
+    const normalizedKey = toFeatureKey(rawFeature);
+    for (const meta of categoryMeta) {
+      if (meta.validSet.has(rawFeature)) {
+        selections[meta.category].push(rawFeature);
+        return;
+      }
+      const label = meta.keyToLabel.get(normalizedKey);
+      if (label) {
+        selections[meta.category].push(label);
+        return;
+      }
+    }
+  });
+
+  Object.entries(selections).forEach(([category, selectedForCategory]) => {
+    const normalized = normalizeFeatureObjectForCategory(
+      category,
+      selectedForCategory,
+      validFeaturesByCategory
+    );
+    if (Object.keys(normalized).length) {
+      features[category] = normalized;
+    }
+  });
+
+  return features;
+}
+
 function normalizeFeatures(categoriesInput, selectedFeatures = {}, validFeaturesInput = DEFAULT_VALID_FEATURES) {
   const categories = normalizeCategories(categoriesInput);
   const validFeaturesByCategory = sanitizeValidFeatures(validFeaturesInput);
@@ -163,16 +220,7 @@ function normalizeFeatures(categoriesInput, selectedFeatures = {}, validFeatures
   if (!categories.length) return features;
 
   if (Array.isArray(selectedFeatures)) {
-    const primaryCategory = categories[0];
-    const normalized = normalizeFeatureObjectForCategory(
-      primaryCategory,
-      selectedFeatures,
-      validFeaturesByCategory
-    );
-    if (Object.keys(normalized).length) {
-      features[primaryCategory] = normalized;
-    }
-    return features;
+    return mapFlatFeaturesToCategories(categories, selectedFeatures, validFeaturesByCategory);
   }
 
   if (!selectedFeatures || typeof selectedFeatures !== "object") {
@@ -195,15 +243,7 @@ function normalizeFeatures(categoriesInput, selectedFeatures = {}, validFeatures
   );
 
   if (!hasPerCategoryInput) {
-    const primaryCategory = categories[0];
-    const normalized = normalizeFeatureObjectForCategory(
-      primaryCategory,
-      selectedFeatures,
-      validFeaturesByCategory
-    );
-    if (Object.keys(normalized).length) {
-      features[primaryCategory] = normalized;
-    }
+    return mapFlatFeaturesToCategories(categories, selectedFeatures, validFeaturesByCategory);
   }
 
   return features;
