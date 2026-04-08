@@ -79,7 +79,6 @@ function buildCanonicalInterestsSchema() {
 
 exports.getInterestsSchema = async (_req, res) => {
   try {
-    const canonicalSchema = buildCanonicalInterestsSchema();
     const canonicalValidFeatures = getDefaultValidFeatures();
 
     if (!Object.keys(canonicalValidFeatures).length) {
@@ -92,22 +91,26 @@ exports.getInterestsSchema = async (_req, res) => {
     ]);
 
     const runtimeValidFeatures = sanitizeValidFeatures(taxonomyDoc?.validFeatures || {});
-    const destinationFeatureObjects = (Array.isArray(destinations) ? destinations : [])
-      .map((item) => item?.features)
-      .filter((item) => item && typeof item === "object");
-
-    const schema = buildInterestsSchema({
-      canonicalValidFeatures,
+    const runtimeSchema = buildInterestsSchema({
+      canonicalValidFeatures: {},
       runtimeValidFeatures,
-      destinationFeatureObjects
+      destinationFeatureObjects: []
     });
+
+    const runtimeHasSubInterests = runtimeSchema.mainInterests.some(
+      (item) => Array.isArray(item.subInterests) && item.subInterests.length > 0
+    );
+
+    const responseSchema = runtimeHasSubInterests
+      ? runtimeSchema
+      : buildCanonicalInterestsSchema();
 
     res.set("Cache-Control", "no-store");
     res.status(200).json({
-      ...canonicalSchema,
-      source: "canonical",
+      ...responseSchema,
+      source: runtimeHasSubInterests ? "runtime" : "canonical",
       diagnostics: {
-        runtimeCategoryCount: schema.mainInterests.length,
+        runtimeCategoryCount: runtimeSchema.mainInterests.length,
         activeDestinationCount: Array.isArray(destinations) ? destinations.length : 0
       }
     });
