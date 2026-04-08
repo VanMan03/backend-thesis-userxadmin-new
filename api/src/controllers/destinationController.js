@@ -77,6 +77,40 @@ function buildCanonicalInterestsSchema() {
   };
 }
 
+function alignSchemaIdsToCanonical(schema) {
+  if (!schema || !Array.isArray(schema.mainInterests)) return schema;
+
+  const mainLabelToId = new Map(
+    MAIN_INTERESTS.map((item) => [item.label, item.id])
+  );
+  const subByMainIdAndLabel = new Map(
+    SUB_INTERESTS.map((item) => [`${item.mainInterestId}::${item.label}`, item.id])
+  );
+
+  schema.mainInterests.forEach((mainInterest) => {
+    if (!mainInterest || typeof mainInterest !== "object") return;
+    const canonicalMainId = mainLabelToId.get(mainInterest.label);
+    if (canonicalMainId) {
+      mainInterest.id = canonicalMainId;
+    }
+
+    if (!Array.isArray(mainInterest.subInterests)) return;
+    const mainIdForLookup = mainInterest.id || canonicalMainId;
+    mainInterest.subInterests.forEach((subInterest) => {
+      if (!subInterest || typeof subInterest !== "object") return;
+      if (!mainIdForLookup) return;
+      const canonicalSubId = subByMainIdAndLabel.get(
+        `${mainIdForLookup}::${subInterest.label}`
+      );
+      if (canonicalSubId) {
+        subInterest.id = canonicalSubId;
+      }
+    });
+  });
+
+  return schema;
+}
+
 exports.getInterestsSchema = async (_req, res) => {
   try {
     const canonicalValidFeatures = getDefaultValidFeatures();
@@ -96,6 +130,7 @@ exports.getInterestsSchema = async (_req, res) => {
       runtimeValidFeatures,
       destinationFeatureObjects: []
     });
+    alignSchemaIdsToCanonical(runtimeSchema);
 
     const runtimeHasSubInterests = runtimeSchema.mainInterests.some(
       (item) => Array.isArray(item.subInterests) && item.subInterests.length > 0
