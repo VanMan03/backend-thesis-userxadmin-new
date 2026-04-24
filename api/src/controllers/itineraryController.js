@@ -51,9 +51,29 @@ function withResolvedStops(itineraryDoc) {
   };
 }
 
+function validateAndNormalizeName(nameInput, { required = false } = {}) {
+  if (nameInput === undefined) {
+    return required
+      ? { ok: false, message: "name is required and cannot be empty" }
+      : { ok: true, provided: false };
+  }
+
+  if (typeof nameInput !== "string") {
+    return { ok: false, message: "name must be a non-empty string" };
+  }
+
+  const trimmedName = nameInput.trim();
+  if (!trimmedName) {
+    return { ok: false, message: "name is required and cannot be empty" };
+  }
+
+  return { ok: true, provided: true, value: trimmedName };
+}
+
 exports.createItinerary = async (req, res) => {
   try {
     const {
+      name,
       destinations,
       stops,
       schedule,
@@ -67,6 +87,16 @@ exports.createItinerary = async (req, res) => {
       collaboratorIds,
       collaborators
     } = req.body;
+    const nameValidation = validateAndNormalizeName(name, { required: true });
+    if (!nameValidation.ok) {
+      await logItineraryEvent(req, {
+        severity: "Warning",
+        event: "Itinerary validation failed",
+        description: nameValidation.message,
+        status: "Failed"
+      });
+      return res.status(400).json({ message: nameValidation.message });
+    }
     const parsedBudget = Number(maxBudget);
     const normalizedDays = normalizeDays(days);
     const normalizedBudgetMode = ["constrained", "unconstrained"].includes(budgetMode)
@@ -138,6 +168,7 @@ exports.createItinerary = async (req, res) => {
 
     const itinerary = await Itinerary.create({
       user: req.user.id,
+      name: nameValidation.value,
       destinations: destinationList,
       days: resolvedDays,
       selectedDates: selectedDatesResult.selectedDates,
@@ -313,8 +344,12 @@ exports.updateItinerary = async (req, res) => {
       schedule
     } = req.body;
 
-    if (typeof name === "string") {
-      itinerary.name = name.trim() || null;
+    const nameValidation = validateAndNormalizeName(name);
+    if (!nameValidation.ok) {
+      return res.status(400).json({ message: nameValidation.message });
+    }
+    if (nameValidation.provided) {
+      itinerary.name = nameValidation.value;
       edit.name = itinerary.name;
     }
 
