@@ -20,6 +20,9 @@ const {
   splitDestinationsByDays
 } = require("../utils/splitItineraryByDays");
 const {
+  applySelectedDatesToItinerary
+} = require("../utils/selectedDates");
+const {
   normalizeCollaborators
 } = require("../utils/collaboratorUtils");
 const {
@@ -465,6 +468,7 @@ exports.generateItinerary = async (req, res) => {
       budgetMode,
       maxBudget,
       days,
+      selectedDates,
       travelStyle,
       collaboratorIds,
       collaborators
@@ -505,6 +509,16 @@ exports.generateItinerary = async (req, res) => {
       return res.status(400).json({ message: "days must be a positive integer" });
     }
 
+    const selectedDatesResult = applySelectedDatesToItinerary({
+      selectedDatesInput: selectedDates,
+      currentDays: null,
+      daysInputProvided: days !== undefined,
+      normalizedDays
+    });
+    if (selectedDatesResult.error) {
+      return res.status(400).json({ message: selectedDatesResult.error });
+    }
+
     if (!collaboratorResult.ok) {
       await logRecommendationEvent(req, {
         severity: "Warning",
@@ -522,7 +536,7 @@ exports.generateItinerary = async (req, res) => {
         travelStyle: collaboratorResult.travelStyle
       })
       : await getHybridRecommendations(userId);
-    const minimumExactMatches = normalizedDays || 1;
+    const minimumExactMatches = selectedDatesResult.days || 1;
     let matchMetadata = buildTwoStageCandidates(hybridResults, featureFilter, minimumExactMatches);
     let candidateResults = matchMetadata.candidates;
 
@@ -601,8 +615,13 @@ exports.generateItinerary = async (req, res) => {
       budgetMode,
       isSaved: false
     };
-    const { dayPlans } = await splitDestinationsByDays(itinerary.destinations, normalizedDays, userId);
-    itinerary.days = normalizedDays;
+    const { dayPlans } = await splitDestinationsByDays(
+      itinerary.destinations,
+      selectedDatesResult.days,
+      userId
+    );
+    itinerary.days = selectedDatesResult.days;
+    itinerary.selectedDates = selectedDatesResult.selectedDates;
     itinerary.dayPlans = dayPlans;
 
     await logRecommendationEvent(req, {
@@ -610,7 +629,7 @@ exports.generateItinerary = async (req, res) => {
       event: "Itinerary recommendations generated",
       description: "User generated itinerary recommendations.",
       status: "Success",
-      metadata: { budgetMode, days: normalizedDays }
+      metadata: { budgetMode, days: selectedDatesResult.days }
     });
 
     const interestDebug = includeInterestDebug
@@ -623,7 +642,8 @@ exports.generateItinerary = async (req, res) => {
     res.json({
       mode: budgetMode,
       totalCost,
-      days: normalizedDays,
+      days: selectedDatesResult.days,
+      selectedDates: selectedDatesResult.selectedDates,
       travelStyle: collaboratorResult.travelStyle,
       collaboratorIds: collaboratorResult.collaboratorIds,
       exactCount: matchMetadata.exactCount,
@@ -660,6 +680,7 @@ exports.generateItineraryBudgetOptimized = async (req, res) => {
       budgetMode,
       maxBudget,
       days,
+      selectedDates,
       limit,
       mainInterests,
       subInterests,
@@ -684,6 +705,21 @@ exports.generateItineraryBudgetOptimized = async (req, res) => {
         "INVALID_DAYS",
         "days must be a positive integer",
         { days }
+      );
+    }
+
+    const selectedDatesResult = applySelectedDatesToItinerary({
+      selectedDatesInput: selectedDates,
+      currentDays: null,
+      daysInputProvided: days !== undefined,
+      normalizedDays
+    });
+    if (selectedDatesResult.error) {
+      return sendPayloadError(
+        res,
+        "INVALID_SELECTED_DATES",
+        selectedDatesResult.error,
+        { selectedDates }
       );
     }
 
@@ -740,7 +776,7 @@ exports.generateItineraryBudgetOptimized = async (req, res) => {
     }
 
     const requestedLimit = clampInteger(
-      limit || (normalizedDays ? normalizedDays * 2 : NaN),
+      limit || (selectedDatesResult.days ? selectedDatesResult.days * 2 : NaN),
       1,
       30
     );
@@ -843,7 +879,11 @@ exports.generateItineraryBudgetOptimized = async (req, res) => {
       hybridScore: item.score,
       rank: item.rank
     }));
-    const { dayPlans } = await splitDestinationsByDays(itineraryDestinations, normalizedDays, userId);
+    const { dayPlans } = await splitDestinationsByDays(
+      itineraryDestinations,
+      selectedDatesResult.days,
+      userId
+    );
     const dayAssignments = dayPlans.map((day) => ({
       dayNumber: day.dayNumber,
       dayCost: roundToTwo(day.dayCost),
@@ -858,15 +898,18 @@ exports.generateItineraryBudgetOptimized = async (req, res) => {
       (sum, day) => sum + day.destinations.length,
       0
     );
-    const emptyDays = normalizedDays
-      ? Math.max(0, normalizedDays - dayAssignments.filter((day) => day.destinations.length > 0).length)
+    const emptyDays = selectedDatesResult.days
+      ? Math.max(
+        0,
+        selectedDatesResult.days - dayAssignments.filter((day) => day.destinations.length > 0).length
+      )
       : 0;
     const unassignedCount = Math.max(0, rankedSelection.length - assignedCount);
-    const avgDestinationsPerDay = normalizedDays
-      ? roundToTwo(rankedSelection.length / normalizedDays)
+    const avgDestinationsPerDay = selectedDatesResult.days
+      ? roundToTwo(rankedSelection.length / selectedDatesResult.days)
       : null;
     const reasonCodes = [];
-    if (normalizedDays && requestedLimit < normalizedDays) {
+    if (selectedDatesResult.days && requestedLimit < selectedDatesResult.days) {
       reasonCodes.push("LIMIT_TOO_LOW");
     }
     if (budgetMode === "constrained" && rankedSelection.length < requestedLimit) {
@@ -880,7 +923,7 @@ exports.generateItineraryBudgetOptimized = async (req, res) => {
       status: "Success",
       metadata: {
         budgetMode,
-        days: normalizedDays,
+        days: selectedDatesResult.days,
         requestedLimit,
         selectedCount: selected.length
       }
@@ -892,7 +935,8 @@ exports.generateItineraryBudgetOptimized = async (req, res) => {
       modelVersion: ITINERARY_MODEL_VERSION,
       pipelineVersion: "ranking-arrangement-v2",
       arrangementVersion: "day-split-v1",
-      days: normalizedDays,
+      days: selectedDatesResult.days,
+      selectedDates: selectedDatesResult.selectedDates,
       budget: {
         mode: budgetMode,
         maxBudget: budgetMode === "constrained" ? normalizedMaxBudget : null,

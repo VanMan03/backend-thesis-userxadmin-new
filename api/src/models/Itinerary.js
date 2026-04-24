@@ -34,6 +34,11 @@ const ItinerarySchema = new mongoose.Schema(
       default: null
     },
 
+    selectedDates: {
+      type: [String],
+      default: undefined
+    },
+
     dayPlans: [
       {
         dayNumber: {

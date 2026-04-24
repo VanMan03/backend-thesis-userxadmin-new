@@ -9,6 +9,9 @@ const {
   splitDestinationsByDays
 } = require("../utils/splitItineraryByDays");
 const {
+  applySelectedDatesToItinerary
+} = require("../utils/selectedDates");
+const {
   sortDestinationsByDistance
 } = require("../services/mapboxService");
 const {
@@ -39,6 +42,7 @@ exports.createItinerary = async (req, res) => {
       budgetMode,
       isSaved,
       days,
+      selectedDates,
       travelStyle,
       collaboratorIds,
       collaborators
@@ -67,6 +71,25 @@ exports.createItinerary = async (req, res) => {
       return res.status(400).json({ message: "days must be a positive integer" });
     }
 
+    const selectedDatesResult = applySelectedDatesToItinerary({
+      selectedDatesInput: selectedDates,
+      currentDays: null,
+      daysInputProvided: days !== undefined,
+      normalizedDays
+    });
+
+    if (selectedDatesResult.error) {
+      await logItineraryEvent(req, {
+        severity: "Warning",
+        event: "Itinerary validation failed",
+        description: selectedDatesResult.error,
+        status: "Failed"
+      });
+      return res.status(400).json({ message: selectedDatesResult.error });
+    }
+
+    const resolvedDays = selectedDatesResult.days;
+
     if (!collaboratorResult.ok) {
       await logItineraryEvent(req, {
         severity: "Warning",
@@ -79,12 +102,13 @@ exports.createItinerary = async (req, res) => {
     }
 
     const destinationList = Array.isArray(destinations) ? destinations : [];
-    const { dayPlans } = splitDestinationsByDays(destinationList, normalizedDays);
+    const { dayPlans } = await splitDestinationsByDays(destinationList, resolvedDays, req.user.id);
 
     const itinerary = await Itinerary.create({
       user: req.user.id,
       destinations: destinationList,
-      days: normalizedDays,
+      days: resolvedDays,
+      selectedDates: selectedDatesResult.selectedDates,
       dayPlans,
       totalCost,
       maxBudget: Number.isFinite(parsedBudget) ? parsedBudget : null,
@@ -249,6 +273,7 @@ exports.updateItinerary = async (req, res) => {
       name,
       tripDays,
       days,
+      selectedDates,
       destinationIds,
       destinations
     } = req.body;
@@ -263,9 +288,25 @@ exports.updateItinerary = async (req, res) => {
     if (daysInput !== undefined && normalizedDays === null) {
       return res.status(400).json({ message: "days must be a positive integer" });
     }
-    if (daysInput !== undefined) {
-      itinerary.days = normalizedDays;
-      edit.tripDays = normalizedDays;
+
+    const selectedDatesResult = applySelectedDatesToItinerary({
+      selectedDatesInput: selectedDates,
+      currentDays: itinerary.days,
+      daysInputProvided: daysInput !== undefined,
+      normalizedDays
+    });
+    if (selectedDatesResult.error) {
+      return res.status(400).json({ message: selectedDatesResult.error });
+    }
+
+    if (daysInput !== undefined || selectedDatesResult.selectedDatesProvided) {
+      itinerary.days = selectedDatesResult.days;
+      edit.tripDays = selectedDatesResult.days;
+    }
+
+    if (selectedDatesResult.selectedDatesProvided) {
+      itinerary.selectedDates = selectedDatesResult.selectedDates;
+      edit.selectedDates = selectedDatesResult.selectedDates;
     }
 
     let resolvedDestinationIds = destinationIds;
@@ -304,7 +345,7 @@ exports.updateItinerary = async (req, res) => {
       edit.destinationIds = itineraryDestinations.map((item) => item.destination.toString());
     }
 
-    const { dayPlans } = splitDestinationsByDays(itinerary.destinations, itinerary.days);
+    const { dayPlans } = await splitDestinationsByDays(itinerary.destinations, itinerary.days, req.user.id);
     itinerary.dayPlans = dayPlans;
     await itinerary.save();
 
@@ -373,6 +414,7 @@ exports.generateItinerary = async (req, res) => {
     const {
       maxBudget,
       days,
+      selectedDates,
       userLongitude,
       userLatitude,
       travelStyle,
@@ -405,6 +447,16 @@ exports.generateItinerary = async (req, res) => {
         status: "Failed"
       });
       return res.status(400).json({ message: "days must be a positive integer" });
+    }
+
+    const selectedDatesResult = applySelectedDatesToItinerary({
+      selectedDatesInput: selectedDates,
+      currentDays: null,
+      daysInputProvided: days !== undefined,
+      normalizedDays
+    });
+    if (selectedDatesResult.error) {
+      return res.status(400).json({ message: selectedDatesResult.error });
     }
 
     if (!collaboratorResult.ok) {
@@ -488,13 +540,18 @@ exports.generateItinerary = async (req, res) => {
       distanceFromUser: item.destination.distanceFromUser || null,
       durationFromUser: item.destination.durationFromUser || null
     }));
-    const { dayPlans } = splitDestinationsByDays(destinations, normalizedDays);
+    const { dayPlans } = await splitDestinationsByDays(
+      destinations,
+      selectedDatesResult.days,
+      userId
+    );
 
     // 6) Save itinerary
     const itinerary = await Itinerary.create({
       user: userId,
       destinations,
-      days: normalizedDays,
+      days: selectedDatesResult.days,
+      selectedDates: selectedDatesResult.selectedDates,
       dayPlans,
       totalCost,
       maxBudget,
