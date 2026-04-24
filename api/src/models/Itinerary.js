@@ -65,6 +65,35 @@ const ItinerarySchema = new mongoose.Schema(
       }
     ],
 
+    stops: [
+      {
+        destinationId: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "Destination"
+        },
+        day: {
+          type: Number,
+          min: 1
+        },
+        sequence: {
+          type: Number,
+          min: 1
+        },
+        startTime: {
+          type: String,
+          default: null
+        },
+        endTime: {
+          type: String,
+          default: null
+        },
+        timezone: {
+          type: String,
+          default: null
+        }
+      }
+    ],
+
     totalCost: {
       type: Number,
       required: true

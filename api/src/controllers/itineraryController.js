@@ -9,6 +9,11 @@ const {
   splitDestinationsByDays
 } = require("../utils/splitItineraryByDays");
 const {
+  extractDestinationId,
+  validateAndNormalizeStops,
+  buildFallbackStops
+} = require("../utils/itineraryStops");
+const {
   applySelectedDatesToItinerary
 } = require("../utils/selectedDates");
 const {
@@ -33,10 +38,25 @@ async function logItineraryEvent(req, payload) {
   });
 }
 
+function withResolvedStops(itineraryDoc) {
+  const itinerary = itineraryDoc?.toObject ? itineraryDoc.toObject() : itineraryDoc;
+  return {
+    ...itinerary,
+    stops: buildFallbackStops({
+      stops: itinerary?.stops,
+      destinations: itinerary?.destinations,
+      dayPlans: itinerary?.dayPlans,
+      days: itinerary?.days
+    })
+  };
+}
+
 exports.createItinerary = async (req, res) => {
   try {
     const {
       destinations,
+      stops,
+      schedule,
       totalCost,
       maxBudget,
       budgetMode,
@@ -102,6 +122,18 @@ exports.createItinerary = async (req, res) => {
     }
 
     const destinationList = Array.isArray(destinations) ? destinations : [];
+    const allowedDestinationIds = destinationList
+      .map((item) => extractDestinationId(item?.destination || item))
+      .filter(Boolean);
+    const normalizedStopsResult = validateAndNormalizeStops({
+      stopsInput: stops ?? schedule,
+      allowedDestinationIds,
+      tripDays: resolvedDays
+    });
+    if (!normalizedStopsResult.ok) {
+      return res.status(400).json({ message: normalizedStopsResult.message });
+    }
+
     const { dayPlans } = await splitDestinationsByDays(destinationList, resolvedDays, req.user.id);
 
     const itinerary = await Itinerary.create({
@@ -110,6 +142,7 @@ exports.createItinerary = async (req, res) => {
       days: resolvedDays,
       selectedDates: selectedDatesResult.selectedDates,
       dayPlans,
+      stops: normalizedStopsResult.provided ? normalizedStopsResult.stops : undefined,
       totalCost,
       maxBudget: Number.isFinite(parsedBudget) ? parsedBudget : null,
       budgetMode: normalizedBudgetMode,
@@ -128,7 +161,7 @@ exports.createItinerary = async (req, res) => {
       metadata: { itineraryId: itinerary._id.toString() }
     });
 
-    res.status(201).json(itinerary);
+    res.status(201).json(withResolvedStops(itinerary));
   } catch (err) {
     console.error(err);
     await logItineraryEvent(req, {
@@ -153,7 +186,7 @@ exports.getUserItineraries = async (req, res) => {
       .populate("dayPlans.destinations.destination")
       .populate("collaboratorIds", "_id fullName email");
 
-    res.json(itineraries);
+    res.json(itineraries.map(withResolvedStops));
   } catch {
     res.status(500).json({ message: "Server error" });
   }
@@ -275,7 +308,9 @@ exports.updateItinerary = async (req, res) => {
       days,
       selectedDates,
       destinationIds,
-      destinations
+      destinations,
+      stops,
+      schedule
     } = req.body;
 
     if (typeof name === "string") {
@@ -345,6 +380,22 @@ exports.updateItinerary = async (req, res) => {
       edit.destinationIds = itineraryDestinations.map((item) => item.destination.toString());
     }
 
+    const allowedDestinationIds = itinerary.destinations
+      .map((item) => extractDestinationId(item?.destination || item))
+      .filter(Boolean);
+    const normalizedStopsResult = validateAndNormalizeStops({
+      stopsInput: stops ?? schedule,
+      allowedDestinationIds,
+      tripDays: itinerary.days
+    });
+    if (!normalizedStopsResult.ok) {
+      return res.status(400).json({ message: normalizedStopsResult.message });
+    }
+    if (normalizedStopsResult.provided) {
+      itinerary.stops = normalizedStopsResult.stops;
+      edit.stops = normalizedStopsResult.stops;
+    }
+
     const { dayPlans } = await splitDestinationsByDays(itinerary.destinations, itinerary.days, req.user.id);
     itinerary.dayPlans = dayPlans;
     await itinerary.save();
@@ -383,7 +434,7 @@ exports.updateItinerary = async (req, res) => {
       updatedAt: itinerary.updatedAt?.toISOString() || new Date().toISOString()
     });
 
-    return res.json(itinerary);
+    return res.json(withResolvedStops(itinerary));
   } catch (err) {
     console.error(err);
     await logItineraryEvent(req, {
